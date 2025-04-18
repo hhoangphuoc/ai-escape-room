@@ -1,0 +1,17 @@
+// tsconfig.json (at your project root)
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",            
+    "moduleResolution": "node",
+    "esModuleInterop": true,        
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "outDir": "dist",
+    "rootDir": "."
+  },
+  "include": [
+    "constant/**/*.ts",
+    "backend/mcp/**/*.ts"
+  ]
+}
