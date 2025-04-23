@@ -41,7 +41,7 @@ const server = new mcp_js_1.McpServer({
     capabilities: { resources: {}, tools: {} }
 });
 //---------------------------------------------------------------------------------------------------
-//  FUNCTIONS FOR TOOLS
+//                                        FUNCTIONS FOR TOOLS
 //---------------------------------------------------------------------------------------------------
 // 1) /start_new_game
 server.tool("start_new_game", "Restart the game and go back to Room 1.", zod_1.z.object({}).shape, async () => {
@@ -55,9 +55,9 @@ server.tool("start_new_game", "Restart the game and go back to Room 1.", zod_1.z
         return createApiErrorResult(error, toolName);
     }
 });
-// 2) /seek_objects_in_room
-server.tool("seek_objects_in_room", "List all objects in the current room.", zod_1.z.object({}).shape, async () => {
-    const toolName = 'seek_objects_in_room';
+// 2) /seek_objects
+server.tool("seek_objects", "List all objects in the current room.", zod_1.z.object({}).shape, async () => {
+    const toolName = 'seek_objects';
     console.log(`MCP: Received /${toolName}`);
     try {
         const response = await axios_1.default.get(`${API_BASE_URL}/room/objects`);

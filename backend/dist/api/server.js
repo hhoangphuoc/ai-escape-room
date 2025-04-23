@@ -33,6 +33,100 @@ const port = process.env.API_PORT || 3001; // Use environment variable or defaul
 app.use((0, cors_1.default)()); // Enable CORS for all origins (adjust for production)
 app.use(body_parser_1.default.json()); // Parse JSON request bodies
 // --- API Endpoints ---
+// GET /api/health - Health check endpoint for CLI connection
+app.get('/api/health', (req, res) => {
+    console.log("API: Received health check request");
+    res.status(200).json({ status: 'healthy', message: 'Backend server is running' });
+});
+// POST /api/command - Process commands from CLI
+app.post('/api/command', (req, res) => {
+    console.log("API: Received /api/command request");
+    const { command } = req.body;
+    console.log(`API: Received command: ${command}`);
+    if (!command) {
+        res.status(400).json({ response: 'No command provided' });
+        return;
+    }
+    // Process command
+    const normalizedCommand = command.trim().toLowerCase();
+    let response = '';
+    if (normalizedCommand === '/help') {
+        response = 'Available commands:\n' +
+            '/help - Shows this help message\n' +
+            '/seek - Lists all interactable objects in the current room\n' +
+            '/analyse [object_name] - Examine an object more closely for details or hints\n' +
+            '/password [your_guess] - Submit a password guess for the current room\n' +
+            '/newgame - Starts a new game, resetting progress to the first room';
+    }
+    else if (normalizedCommand === '/seek') {
+        try {
+            const room = getCurrentRoomData();
+            const objectNames = Object.values(room.objects).map((o) => o.name);
+            response = `You are in ${room.name}. Looking around, you see:\n` +
+                objectNames.map(name => `- ${name}`).join('\n');
+        }
+        catch (error) {
+            response = 'Error: Could not retrieve room objects.';
+        }
+    }
+    else if (normalizedCommand.startsWith('/analyse ')) {
+        const objectName = normalizedCommand.substring('/analyse '.length).trim();
+        try {
+            const room = getCurrentRoomData();
+            const key = Object.keys(room.objects).find(k => k.toLowerCase() === objectName.toLowerCase() ||
+                room.objects[k].name.toLowerCase() === objectName.toLowerCase());
+            if (!key) {
+                response = `Object '${objectName}' not found in room.`;
+            }
+            else {
+                const obj = room.objects[key];
+                response = `${obj.name}: ${obj.description}\n\n${obj.details}`;
+            }
+        }
+        catch (error) {
+            response = 'Error: Could not analyse object.';
+        }
+    }
+    else if (normalizedCommand.startsWith('/password ')) {
+        const passwordGuess = normalizedCommand.substring('/password '.length).trim();
+        try {
+            const room = getCurrentRoomData();
+            if (passwordGuess === room.password) {
+                let message = `Correct! Unlocked '${room.name}'.`;
+                const nextRoomId = gameState.currentRoom + 1;
+                if (objects_1.ROOM_OBJECTS[nextRoomId]) {
+                    gameState.currentRoom = nextRoomId;
+                    const nextRoom = getCurrentRoomData();
+                    message += `\n\nMoving to room ${nextRoomId}: ${nextRoom.name}.`;
+                }
+                else {
+                    message += `\n\nCongratulations! You've escaped all rooms!`;
+                }
+                response = message;
+            }
+            else {
+                response = `Wrong password. Try again.`;
+            }
+        }
+        catch (error) {
+            response = 'Error: Could not process password.';
+        }
+    }
+    else if (normalizedCommand === '/newgame') {
+        gameState = { currentRoom: 1, isCustomGame: false, customGameData: null };
+        try {
+            const room = getCurrentRoomData();
+            response = `New game started. You're in room 1: ${room.name}.`;
+        }
+        catch (error) {
+            response = 'Error: Failed to start new game.';
+        }
+    }
+    else {
+        response = `Unknown command: ${command}. Type /help to see available commands.`;
+    }
+    res.json({ response });
+});
 // POST /game/start - Start a new game
 app.post('/game/start', (req, res) => {
     console.log("API: Received /game/start request");
