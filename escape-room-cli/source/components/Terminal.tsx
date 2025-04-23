@@ -3,8 +3,8 @@ import { Box, Text } from 'ink';
 import CommandInput, { COMMANDS } from './CommandInput.js';
 import CommandHistory from './CommandHistory.js';
 import ScrollableBox from './ScrollableBox.js';
-import { McpClient } from '@modelcontextprotocol/sdk/client/mcp.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import {MCPClient} from '../../mcp/index.js'
+import Anthropic from '@anthropic-ai/sdk';
 
 interface TerminalProps {
 	mode: 'standard' | 'mcp';
@@ -18,7 +18,7 @@ const Terminal: React.FC<TerminalProps> = ({ mode }) => {
 	const [isConnected, setIsConnected] = useState(false);
 	const [mcpConnected, setMcpConnected] = useState(false);
 	const [apiKey, setApiKey] = useState<string | null>(null);
-	const [mcpClient, setMcpClient] = useState<McpClient | null>(null);
+	const [mcpClient, setMcpClient] = useState<MCPClient | null>(null);
 	const [mcpTools, setMcpTools] = useState<string[]>([]);
 
 	// Add initial welcome message
@@ -91,35 +91,33 @@ const Terminal: React.FC<TerminalProps> = ({ mode }) => {
 	}, [mode]);
 
 	// Initialize MCP client
-	const initializeMcpClient = async (key: string) => {
+	const initializeMcpClient = async (apiKey: string) => {
 		try {
 			setHistory(prev => [
 				...prev,
 				{ type: 'response', text: 'Connecting to MCP server...' },
 			]);
 
-			// Create a new MCP client
-			const client = new McpClient({
-				apiKey: key,
+			const anthropic = new Anthropic({
+				apiKey: apiKey,
 			});
 
-			// Connect using stdio transport
-			const transport = new StdioClientTransport();
-			await client.connect(transport);
+			// Create a new MCP client
+			const mcpClient = new MCPClient(
+			);
 
 			// Get available tools
-			const serverInfo = await client.getServerInfo();
-			const tools = Object.keys(serverInfo.capabilities.tools || {});
+			const tools = await mcpClient.getTools();
 
-			setMcpClient(client);
-			setMcpTools(tools);
+			setMcpClient(mcpClient);
+			setMcpTools(tools.map(tool => tool.name));
 			setMcpConnected(true);
 
 			setHistory(prev => [
 				...prev,
 				{
 					type: 'response',
-					text: `Connected to MCP server ${serverInfo.name} v${serverInfo.version}`,
+					text: `Connected to MCP server`,
 				},
 				{
 					type: 'response',
@@ -144,7 +142,7 @@ const Terminal: React.FC<TerminalProps> = ({ mode }) => {
 		if (mcpClient) {
 			try {
 				// Close the connection
-				mcpClient.disconnect();
+				mcpClient.disconnectFromServer();
 				setMcpClient(null);
 				setMcpConnected(false);
 				setMcpTools([]);
@@ -213,15 +211,15 @@ const Terminal: React.FC<TerminalProps> = ({ mode }) => {
 		// Process MCP-specific commands
 		if (command.startsWith('/mcp-auth')) {
 			const parts = command.split(' ');
-			if (parts.length >= 2) {
-				const key = parts[1].trim();
-				setApiKey(key);
+			if (parts.length >= 2 && parts[1]) {
+				const apiKey = parts[1].trim();
+				setApiKey(apiKey);
 				// Store API key
-				const stored = setStoredApiKey(key);
+				const stored = setStoredApiKey(apiKey);
 				if (!stored) {
 					console.warn('Could not store API key for future sessions');
 				}
-				await initializeMcpClient(key);
+				await initializeMcpClient(apiKey);
 				return 'API key stored. Connecting to MCP server...';
 			}
 			return 'Please provide an API key: /mcp-auth [your-api-key]';
@@ -252,7 +250,7 @@ const Terminal: React.FC<TerminalProps> = ({ mode }) => {
 		if (mcpClient && mcpConnected) {
 			// Extract the tool name (remove leading slash)
 			const cmdParts = command.split(' ');
-			const toolName = cmdParts[0].substring(1); // Remove the leading slash
+			const toolName = cmdParts[0] ? cmdParts[0].substring(1) : ''; // Remove the leading slash
 
 			// Check if this is a valid tool
 			if (mcpTools.includes(toolName)) {
@@ -290,18 +288,24 @@ const Terminal: React.FC<TerminalProps> = ({ mode }) => {
 					}
 
 					// Call the MCP tool
-					const result = await mcpClient.callTool(toolName, args);
-					
+					const result = await mcpClient.processQuery(command);
+					console.log(result);
+
+					return result;
+					//FIXME: ------------------------------------------------------------
+					// THIS PART HANDLED IMPLICITLY BY THE MCP CLIENT
 					// Extract text from the result
-					if (result.content && result.content.length > 0) {
-						// Find the first text content
-						const textContent = result.content.find(item => item.type === 'text');
-						if (textContent && 'text' in textContent) {
-							return textContent.text;
-						}
-					}
+					// if (result.content && result.content.length > 0) {
+					// 	// Find the first text content
+					// 	const textContent = result.content.find((item: any) => item.type === 'text');
+					// 	if (textContent && 'text' in textContent) {
+					// 		return textContent.text;
+					// 	}
+					// }
 					
-					return JSON.stringify(result);
+					// return JSON.stringify(result);
+					//----------------------------------------------------------------------
+
 				} catch (error) {
 					console.error(`Error calling MCP tool ${toolName}:`, error);
 					return `Error calling MCP tool ${toolName}: ${error instanceof Error ? error.message : 'Unknown error'}`;
@@ -376,9 +380,11 @@ const Terminal: React.FC<TerminalProps> = ({ mode }) => {
 					[{mode === 'standard' ? 'Standard Mode' : 'MCP Client Mode'}]
 				</Text>
 				{mode === 'mcp' && (
-					<Text color={mcpConnected ? 'green' : 'red'} marginLeft={1}>
-						{mcpConnected ? '✓ Connected' : '✗ Not Connected'}
-					</Text>
+					<Box marginLeft={1}>
+						<Text color={mcpConnected ? 'green' : 'red'}>
+							{mcpConnected ? '✓ Connected' : '✗ Not Connected'}
+						</Text>
+					</Box>
 				)}
 			</Box>
 

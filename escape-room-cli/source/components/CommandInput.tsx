@@ -75,14 +75,39 @@ const CommandInput: React.FC<CommandInputProps> = ({
 		return () => clearInterval(timer);
 	}, [isRawModeSupported]);
 
-	// Filter commands based on user input
+	// Filter commands based on user input and mode
 	useEffect(() => {
 		// Show suggestions when input starts with "/"
 		if (value.startsWith('/')) {
 			setShowSuggestions(true);
 
+			// Define mode-specific commands
+			let availableCommands = {...COMMANDS};
+			
+			// If in MCP mode, add MCP-specific commands and show only applicable ones
+			if (mode === 'mcp') {
+				// Add MCP-specific commands
+				const mcpCommands: CommandCollection = {
+					'/mcp-auth': {
+						description: 'Set your MCP API key',
+						usage: '/mcp-auth [your-api-key]',
+					},
+					'/disconnect': {
+						description: 'Disconnect from MCP server',
+						usage: '/disconnect',
+					},
+					'/help': {
+						description: 'Shows available commands and their usage.',
+						usage: '/help',
+					},
+				};
+				
+				// Override with MCP commands
+				availableCommands = mcpCommands;
+			}
+
 			// Filter commands that match the current input
-			const filtered = Object.entries(COMMANDS).reduce(
+			const filtered = Object.entries(availableCommands).reduce(
 				(acc, [cmd, details]) => {
 					if (cmd.startsWith(value.toLowerCase())) {
 						acc[cmd] = details;
@@ -96,7 +121,7 @@ const CommandInput: React.FC<CommandInputProps> = ({
 		} else {
 			setShowSuggestions(false);
 		}
-	}, [value]);
+	}, [value, mode]);
 
 	// Handle keyboard input only if raw mode is supported
 	useInput((input: string, key: Key) => {
