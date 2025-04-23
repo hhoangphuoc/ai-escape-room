@@ -1,84 +1,16 @@
 "use strict";
-// backend/mcp/index.ts
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-// import { McpServer} from "@modelcontextprotocol/sdk/server/mcp.js";
-const index_js_1 = require("@modelcontextprotocol/sdk/server/index.js");
+// backend/mcp/index.ts
+const mcp_js_1 = require("@modelcontextprotocol/sdk/server/mcp.js");
 const stdio_js_1 = require("@modelcontextprotocol/sdk/server/stdio.js");
 const zod_1 = require("zod");
-const types_js_1 = require("@modelcontextprotocol/sdk/types.js");
 const axios_1 = __importDefault(require("axios"));
 // Define the base URL for the API server
 const API_BASE_URL = process.env.API_URL || "http://localhost:3001";
 const MCP_SERVER_VERSION = "0.1.0";
-//--------------------------------
-//  TOOLS DEFINITIONS
-//--------------------------------
-// Zod schemas for input validation within handlers
-const AnalyseObjectInputSchema = zod_1.z.object({
-    object_name: zod_1.z.string().min(1, "Object name cannot be empty"),
-});
-const SubmitPasswordInputSchema = zod_1.z.object({
-    password_guess: zod_1.z.string().min(1, "Password guess cannot be empty"),
-});
-// Define input schemas as plain objects for Tool definition
-const analyseObjectPlainSchema = {
-    type: "object",
-    properties: {
-        object_name: { type: "string", description: "The exact name of the object to analyze" }
-    },
-    required: ["object_name"]
-};
-const submitPasswordPlainSchema = {
-    type: "object",
-    properties: {
-        password_guess: { type: "string", description: "The password to try" }
-    },
-    required: ["password_guess"]
-};
-const START_NEW_GAME_TOOL = {
-    name: "start_new_game",
-    description: "Restart the game and go back to Room 1.",
-};
-const SEEK_OBJECTS_TOOL = {
-    name: "seek_objects_in_room",
-    description: "List all objects in the current room.",
-};
-const ANALYSE_OBJECT_TOOL = {
-    name: "analyse_object",
-    description: "Inspect an object in the current room for clues.",
-    inputSchema: analyseObjectPlainSchema,
-};
-const SUBMIT_PASSWORD_TOOL = {
-    name: "submit_password",
-    description: "Try a password to unlock the current room.",
-    inputSchema: submitPasswordPlainSchema,
-};
-// List of all tools
-const ALL_TOOLS = [
-    START_NEW_GAME_TOOL,
-    SEEK_OBJECTS_TOOL,
-    ANALYSE_OBJECT_TOOL,
-    SUBMIT_PASSWORD_TOOL
-];
-//---------------------------------------------------------------------------------------------------
-//                                    MCP Server Setup
-//---------------------------------------------------------------------------------------------------
-// Use the generic Server class to use setRequestHandler
-const server = new index_js_1.Server({
-    name: "escape-room-server",
-    version: MCP_SERVER_VERSION,
-    capabilities: {
-        resources: {},
-        // Tools list can be dynamically generated or manually listed if preferred
-        tools: ALL_TOOLS.reduce((acc, tool) => {
-            acc[tool.name] = tool;
-            return acc;
-        }, {})
-    }
-});
 //---------------------------------------------------------------------------------------------------
 //  Helper Functions
 //---------------------------------------------------------------------------------------------------
@@ -102,12 +34,19 @@ function createApiErrorResult(error, toolName) {
     }
     return createTextResult(message);
 }
+// --- MCP Server Setup ---
+const server = new mcp_js_1.McpServer({
+    name: "mcp-ai-escape-room",
+    version: MCP_SERVER_VERSION,
+    capabilities: { resources: {}, tools: {} }
+});
 //---------------------------------------------------------------------------------------------------
 //  FUNCTIONS FOR TOOLS
 //---------------------------------------------------------------------------------------------------
-async function handleStartNewGame() {
-    const toolName = START_NEW_GAME_TOOL.name;
-    console.log(`MCP: Handling /${toolName}`);
+// 1) /start_new_game
+server.tool("start_new_game", "Restart the game and go back to Room 1.", zod_1.z.object({}).shape, async () => {
+    const toolName = 'start_new_game';
+    console.log(`MCP: Received /${toolName}`);
     try {
         const response = await axios_1.default.post(`${API_BASE_URL}/game/start`);
         return createTextResult(response.data.message || "New game started.");
@@ -115,10 +54,11 @@ async function handleStartNewGame() {
     catch (error) {
         return createApiErrorResult(error, toolName);
     }
-}
-async function handleSeekObjects() {
-    const toolName = SEEK_OBJECTS_TOOL.name;
-    console.log(`MCP: Handling /${toolName}`);
+});
+// 2) /seek_objects_in_room
+server.tool("seek_objects_in_room", "List all objects in the current room.", zod_1.z.object({}).shape, async () => {
+    const toolName = 'seek_objects_in_room';
+    console.log(`MCP: Received /${toolName}`);
     try {
         const response = await axios_1.default.get(`${API_BASE_URL}/room/objects`);
         const { roomName = 'current room', objects = [] } = response.data;
@@ -130,16 +70,13 @@ async function handleSeekObjects() {
     catch (error) {
         return createApiErrorResult(error, toolName);
     }
-}
-async function handleAnalyseObject(args) {
-    const toolName = ANALYSE_OBJECT_TOOL.name;
-    console.log(`MCP: Handling /${toolName}`, args);
-    const parseResult = AnalyseObjectInputSchema.safeParse(args);
-    if (!parseResult.success) {
-        const errorMsg = parseResult.error.errors.map(e => e.message).join(', ');
-        return createTextResult(`Invalid input for ${toolName}: ${errorMsg}`);
-    }
-    const { object_name } = parseResult.data;
+});
+// 3) /analyse_object
+server.tool("analyse_object", "Inspect an object in the current room for clues.", zod_1.z.object({
+    object_name: zod_1.z.string().min(1, "Object name cannot be empty").describe("The exact name of the object to analyze"),
+}).shape, async ({ object_name }) => {
+    const toolName = 'analyse_object';
+    console.log(`MCP: Received /${toolName} for object: ${object_name}`);
     try {
         const encodedObjectName = encodeURIComponent(object_name);
         const response = await axios_1.default.get(`${API_BASE_URL}/object/${encodedObjectName}`);
@@ -153,48 +90,19 @@ async function handleAnalyseObject(args) {
         }
         return createApiErrorResult(error, toolName);
     }
-}
-async function handleSubmitPassword(args) {
-    const toolName = SUBMIT_PASSWORD_TOOL.name;
-    console.log(`MCP: Handling /${toolName} with args: [REDACTED]`); // Avoid logging args if they contain password
-    const parseResult = SubmitPasswordInputSchema.safeParse(args);
-    if (!parseResult.success) {
-        const errorMsg = parseResult.error.errors.map(e => e.message).join(', ');
-        return createTextResult(`Invalid input for ${toolName}: ${errorMsg}`);
-    }
-    const { password_guess } = parseResult.data;
+});
+// 4) /submit_password
+server.tool("submit_password", "Try a password to unlock the current room.", zod_1.z.object({
+    password_guess: zod_1.z.string().min(1, "Password guess cannot be empty").describe("The password to try"),
+}).shape, async ({ password_guess }) => {
+    const toolName = 'submit_password';
+    console.log(`MCP: Handling /${toolName} with password: [REDACTED]`);
     try {
         const response = await axios_1.default.post(`${API_BASE_URL}/room/unlock`, { password_guess });
         return createTextResult(response.data.message || "Password submitted.");
     }
     catch (error) {
         return createApiErrorResult(error, toolName);
-    }
-}
-//---------------------------------------------------------------------------------------------------
-//  MCP Request Handlers
-//---------------------------------------------------------------------------------------------------
-// Handler for listing available tools
-server.setRequestHandler(types_js_1.ListToolsRequestSchema, async () => ({
-    tools: ALL_TOOLS, // Return the array of tool definitions
-}));
-// Handler for calling a specific tool
-server.setRequestHandler(types_js_1.CallToolRequestSchema, async (req) => {
-    // Let TypeScript infer params type from schema
-    const { name, arguments: args } = req.params;
-    console.log(`MCP: Received tool call request for '${name}' with args:`, args);
-    switch (name) {
-        case START_NEW_GAME_TOOL.name:
-            return handleStartNewGame();
-        case SEEK_OBJECTS_TOOL.name:
-            return handleSeekObjects();
-        case ANALYSE_OBJECT_TOOL.name:
-            return handleAnalyseObject(args);
-        case SUBMIT_PASSWORD_TOOL.name:
-            return handleSubmitPassword(args);
-        default:
-            console.error(`MCP: Unknown tool called: ${name}`);
-            return createTextResult(`Error: Unknown tool '${name}'.`);
     }
 });
 //---------------------------------------------------------------------------------------------------
