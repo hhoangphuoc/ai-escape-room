@@ -8,10 +8,14 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "outDir": "dist",
-    "rootDir": "."
+    "rootDir": ".",
+    "resolveJsonModule": true,
+    "sourceMap": true
   },
   "include": [
     "constant/**/*.ts",
-    "backend/mcp/**/*.ts"
-  ]
+    "api/**/*.ts",
+    "mcp/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
 }

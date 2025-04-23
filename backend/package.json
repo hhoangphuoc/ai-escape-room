@@ -2,21 +2,25 @@
     "name": "escape-room-backend",
     "version": "1.0.0",
     "description": "Escape Room Server for AI Escape Room",
-    "main": "server.js",
+    "main": "dist/api/server.js",
     "scripts": {
-        "start": "node server.js",
-        "build": "tsc",
-        "mcp:build": "tsc",
-        "mcp:start": "node dist/backend/mcp/index.js"
+        "clean": "rm -rf dist",
+        "build": "npm run clean && tsc",
+        "start": "concurrently \"npm run start:api\" \"npm run start:mcp\"",
+        "start:api": "node dist/api/server.js",
+        "start:mcp": "node dist/mcp/index.js"
     },
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.10.1",
+        "axios": "^1.7.2",
         "body-parser": "^1.20.2",
+        "concurrently": "^8.2.2",
         "cors": "^2.8.5",
         "express": "^4.18.2",
         "zod": "^3.24.3"
     },
     "devDependencies": {
+        "@types/axios": "^0.14.0",
         "@types/cors": "^2.8.17",
         "@types/express": "^5.0.1",
         "@types/node": "^22.14.1",
