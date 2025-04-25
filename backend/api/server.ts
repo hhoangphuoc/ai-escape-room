@@ -194,6 +194,53 @@ app.post('/game/start', (req: Request, res: Response) => {
     }
 });
 
+// POST /api/newgame - Create a new escape room using RoomAgent
+app.post('/api/newgame', async (req: Request, res: Response) => {
+    console.log("API: Received /api/newgame request");
+    try {
+        // Create a new RoomAgent instance
+        const newRoomAgent = new RoomAgent(99); // Use a unique ID
+        
+        // Wait for the room to be generated
+        const result = await newRoomAgent.process('/newgame');
+        
+        // Update gameState to use custom game
+        gameState = {
+            currentRoom: 99,
+            isCustomGame: true,
+            customGameData: {
+                room: 99,
+                rooms: {
+                    99: (newRoomAgent as any).roomData // Access the generated room data
+                }
+            }
+        };
+
+        // Get the room data to return to the client
+        const roomData = (newRoomAgent as any).roomData;
+        
+        // Add the agent to the agents collection
+        agents[99] = newRoomAgent;
+        
+        res.json({
+            success: true, 
+            message: result.response,
+            game: {
+                name: roomData.name,
+                background: roomData.description || roomData.background,
+                currentRoom: 99,
+                objectCount: roomData.objects.length
+            }
+        });
+    } catch (error) {
+        console.error("API Error in /api/newgame:", error);
+        res.status(500).json({ 
+            success: false,
+            error: "Failed to create new game. Error generating room data."
+        });
+    }
+});
+
 // GET /game/state - Get current game state
 app.get('/game/state', (req: Request, res: Response) => {
     console.log("API: Received /game/state request");
