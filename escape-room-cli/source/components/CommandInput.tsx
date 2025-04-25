@@ -21,27 +21,34 @@ export const COMMANDS: CommandCollection = {
 		description: 'Shows available commands and their usage.',
 		usage: '/help',
 	},
-	'/seek': {
-		description: 'Lists all interactable objects in the current room.',
-		usage: '/seek',
-	},
-	'/analyse': {
-		description: 'Examine an object more closely for details or hints.',
-		usage: '/analyse [object_name]',
-	},
-	'/password': {
-		description: 'Submit a password guess for the current room.',
-		usage: '/password [your_guess]',
-	},
 	'/newgame': {
-		description: 'Starts a new game, resetting progress to the first room.',
+		description: 'Starts a new game, resetting progress of the current room.',
 		usage: '/newgame',
 	},
-	'/create-game': {
-		description: 'Creates a simple custom game with one room.',
-		usage:
-			'/create-game "Concept Name" "object1,object2,..." "password(optional)"',
+	// '/generatenewgame': {
+	// 	description: 'Creates a completely new AI-generated escape room.',
+	// 	usage: '/generatenewgame',
+	// },
+	'/look': {
+		description: 'Look around the room',
+		usage: '/look',
 	},
+	'/inspect': {
+		description: 'Inspect an object for details or hints',
+		usage: '/inspect [object_name]',
+	},
+	'/guess': {
+		description: 'Guess a password for the current room',
+		usage: '/guess [password]',
+	},
+	'/hint': {
+		description: 'Get a hint for the current room',
+		usage: '/hint',
+	},
+	'/restart': {
+		description: 'Restart the game',
+		usage: '/restart',
+	}
 };
 
 interface CommandInputProps {
