@@ -3,3 +3,4 @@
 **/dist
 # Environment variables
 .env
+CLAUDE.md

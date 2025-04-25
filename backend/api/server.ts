@@ -3,7 +3,10 @@ import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import bodyParser from 'body-parser';
 import { ROOM_OBJECTS, type Room, type GameObject } from '../constant/objects'; // Adjust path as necessary
+import { RoomAgent, type RoomCommandResponse } from '../agents/RoomAgent';
 
+
+//-------------------------------- CUSTOM GAME DATA --------------------------------
 interface CustomGameData {
     room: number;
     rooms: Record<number, Room>;
@@ -22,6 +25,7 @@ let gameState: GameState = {
     customGameData: null,
 };
 
+
 function getCurrentRoomData(): Room {
     if (gameState.isCustomGame && gameState.customGameData) {
         // Logic for custom games (if implemented later)
@@ -35,6 +39,15 @@ function getCurrentRoomData(): Room {
     }
     return ROOM_OBJECTS[validRoomId];
 }
+//---------------------------------------------------------------------------------------------
+
+// --- Initialize Room Agents ---
+const agents: Record<number, RoomAgent> = {};
+Object.keys(ROOM_OBJECTS).forEach(key => {
+  const id = parseInt(key, 10);
+  agents[id] = new RoomAgent(id);
+});
+//--------------------------------
 
 // --- Express App Setup ---
 const app: Application = express();
@@ -44,6 +57,33 @@ app.use(cors()); // Enable CORS for all origins (adjust for production)
 app.use(bodyParser.json()); // Parse JSON request bodies
 
 // --- API Endpoints ---
+// GET /rooms - list available rooms
+app.get('/api/rooms', (req: Request, res: Response) => {
+  const rooms = Object.entries(ROOM_OBJECTS).map(([id, room]) => ({ id: parseInt(id, 10), name: room.name }));
+  res.json({ rooms });
+});
+
+// POST /rooms/:id/command - send a command to a room agent
+app.post('/api/rooms/:id/command', async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id, 10);
+  const agent = agents[id];
+  if (!agent) {
+    res.status(404).json({ error: 'Room not found' });
+    return;
+  }
+  const { input } = req.body;
+  if (typeof input !== 'string') {
+    res.status(400).json({ error: 'Input must be a string' });
+    return;
+  }
+  try {
+    const result: RoomCommandResponse = await agent.process(input);
+    res.json(result);
+  } catch (err: any) {
+    console.error('RoomAgent error:', err);
+    res.status(500).json({ response: 'Internal error processing command.' });
+  }
+});
 
 // GET /api/health - Health check endpoint for CLI connection
 app.get('/api/health', (req: Request, res: Response) => {
