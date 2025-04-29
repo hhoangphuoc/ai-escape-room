@@ -26,6 +26,10 @@ export const USER_COMMANDS: CommandCollection = {
         description: 'Shows available commands and their usage.',
         usage: '/help'
     },
+    '/history': {
+        description: 'Shows the history of commands and responses',
+        usage: '/history'
+    },
     '/look': {
         description: 'Look around the room',
         usage: '/look'

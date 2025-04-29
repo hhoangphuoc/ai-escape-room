@@ -1,6 +1,7 @@
 import axios from 'axios';
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
+import { SYSTEM_PROMPT, USER_MESSAGE } from '../constant/prompts';
 
 dotenv.config();
 
@@ -25,6 +26,7 @@ export interface RoomCommandResponse {
  *   }>;
  * }
  */
+
 interface LLMRoomData {
   name: string;
   background: string;
@@ -57,9 +59,8 @@ export class RoomAgent {
 
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-    const SYSTEM_PROMPT = "Design an intricate and creative escape room scenario focusing on detailed storytelling and object design.\n\nCreate a JSON object with the following elements:\n\n- **name**: A captivating title for the escape room that hints at its theme.\n- **background**: A detailed story setting the scene and creating an immersive atmosphere for participants.\n- **password**: A unique and interesting key that players must discover to escape. It should be either a sequence of a 4-digit number, a chemical formula, or meaningful text, but not both. Note that the description of the objects can lead to the clues to find out the password, but these descriptions do not explicitly mention the password.\n- **objects**: 4-6 intricately designed items, each with:\n  - **name**: The item's name\n  - **description**: A vivid depiction of the item's appearance and purpose\n  - **details**: An array of intriguing features or clues associated with the item.\n\nRespond only with the JSON.\n\n# Output Format\n\nProvide the response in a JSON format, focusing on creativity and detail in each component. \n\n# Notes\n\n- Ensure the escape room theme is consistent across the name, background, password, and objects.\n- Be imaginative in crafting the story and objects to enhance user engagement and challenge."
 
-    const USER_MESSAGE = "/newgame"
+
     const res = await openai.chat.completions.create({
       model: 'gpt-4-1106-preview',
       messages: [
@@ -81,8 +82,7 @@ export class RoomAgent {
         JSON.stringify({
           hasText: !!res.choices[0]?.message?.content,
           textType: typeof res.choices[0]?.message?.content,
-          responseKeys: Object.keys(res.choices[0]?.message?.content || {}),
-          responseType: typeof res.choices[0]?.message?.content
+          responseType: typeof res.choices[0]?.message?.content,
         }, null, 2)
       );
       
@@ -122,6 +122,7 @@ export class RoomAgent {
         } else if (content.startsWith('```')) {
           jsonContent = content.replace(/```\n/, '').replace(/\n```$/, '');
         }
+        console.log('Escape room content:', jsonContent);
         
         try {
           this.roomData = JSON.parse(jsonContent) as LLMRoomData;
