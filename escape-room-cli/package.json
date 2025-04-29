@@ -1,24 +1,48 @@
 {
-	"name": "escape-room-cli",
-	"version": "0.0.0",
-	"license": "MIT",
-	"bin": "dist/cli.js",
+	"name": "@hhoangphuoc/escape-room-cli",
+	"version": "0.1.0",
+	"license": "Apache-2.0",
+	"bin": {
+		"escape-room-cli": "dist/cli.js"
+	},
 	"type": "module",
 	"engines": {
 		"node": ">=16"
 	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/hhoangphuoc/escape-room-cli.git"
+	},
+	"keywords": [
+		"escape-room",
+		"cli",
+		"ink",
+		"game"
+	],
+	"author": "Phuoc Ho",
 	"scripts": {
 		"build": "tsc",
 		"dev": "tsc --watch",
 		"start": "node dist/cli.js",
-		"test": "prettier --check . && xo && ava"
+		"test": "prettier --check . && xo && ava",
+		"lint": "prettier --check . && xo",
+		"format": "prettier --check source/**/*.{js,ts,jsx,tsx} && prettier --write source/**/*.{js,ts,jsx,tsx}",
+		"prepublishOnly": "npm run build",
+		"release:readme": "cp ../README.md ./README.md",
+		"release:build-and-publish": "npm run build && npm publish",
+		"release": "npm run release:readme && npm install && npm run release:build-and-publish"
 	},
 	"files": [
 		"dist"
 	],
+	"publishConfig": {
+		"access": "public"
+	},
 	"dependencies": {
 		"@anthropic-ai/sdk": "^0.39.0",
+		"@inkjs/ui": "^2.0.0",
 		"@modelcontextprotocol/sdk": "^1.10.2",
+		"@typescript-eslint/eslint-plugin": "^8.31.0",
 		"axios": "^1.8.4",
 		"dotenv": "^16.5.0",
 		"fullscreen-ink": "^0.0.2",
@@ -26,6 +50,8 @@
 		"ink-big-text": "^2.0.0",
 		"ink-gradient": "^3.0.0",
 		"ink-select-input": "^6.1.0",
+		"ink-spinner": "^5.0.0",
+		"ink-text-input": "^6.0.0",
 		"meow": "^11.0.0",
 		"react": "^18.2.0"
 	},
