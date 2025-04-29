@@ -25,10 +25,10 @@ export const COMMANDS: CommandCollection = {
 		description: 'Starts a new game, resetting progress of the current room.',
 		usage: '/newgame',
 	},
-	// '/generatenewgame': {
-	// 	description: 'Creates a completely new AI-generated escape room.',
-	// 	usage: '/generatenewgame',
-	// },
+	'/history': {
+		description: 'Shows the history of commands and responses',
+		usage: '/history',
+	},
 	'/look': {
 		description: 'Look around the room',
 		usage: '/look',
