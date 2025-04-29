@@ -1,56 +1,7 @@
 import React, {useState, useEffect} from 'react';
 import {Box, Text, useInput, useStdin} from 'ink';
 import type {Key} from 'ink';
-
-// Define command types based on commands.ts in backend
-// This matches the structure in backend/constant/commands.ts
-interface CommandDetails {
-	description: string;
-	usage: string;
-	aliases?: string[];
-	args?: boolean;
-}
-
-interface CommandCollection {
-	[key: string]: CommandDetails;
-}
-
-// Command list - kept in sync with backend/constant/commands.ts
-export const COMMANDS: CommandCollection = {
-	'/help': {
-		description: 'Shows available commands and their usage.',
-		usage: '/help',
-	},
-	'/newgame': {
-		description: 'Starts a new game, resetting progress of the current room.',
-		usage: '/newgame',
-	},
-	'/history': {
-		description: 'Shows the history of commands and responses',
-		usage: '/history',
-	},
-	'/look': {
-		description: 'Look around the room',
-		usage: '/look',
-	},
-	'/inspect': {
-		description: 'Inspect an object for details or hints',
-		usage: '/inspect [object_name]',
-	},
-	'/guess': {
-		description: 'Guess a password for the current room',
-		usage: '/guess [password]',
-	},
-	'/hint': {
-		description: 'Get a hint for the current room',
-		usage: '/hint',
-	},
-	'/restart': {
-		description: 'Restart the game',
-		usage: '/restart',
-	}
-};
-
+import { COMMANDS } from '../utils/constants.js';
 interface CommandInputProps {
 	value: string;
 	onChange: (value: string) => void;
@@ -92,26 +43,26 @@ const CommandInput: React.FC<CommandInputProps> = ({
 			let availableCommands = {...COMMANDS};
 			
 			// If in MCP mode, add MCP-specific commands and show only applicable ones
-			if (mode === 'mcp') {
-				// Add MCP-specific commands
-				const mcpCommands: CommandCollection = {
-					'/mcp-auth': {
-						description: 'Set your MCP API key',
-						usage: '/mcp-auth [your-api-key]',
-					},
-					'/disconnect': {
-						description: 'Disconnect from MCP server',
-						usage: '/disconnect',
-					},
-					'/help': {
-						description: 'Shows available commands and their usage.',
-						usage: '/help',
-					},
-				};
+			// if (mode === 'mcp') {
+			// 	// Add MCP-specific commands
+			// 	const mcpCommands: CommandCollection = {
+			// 		'/mcp-auth': {
+			// 			description: 'Set your MCP API key',
+			// 			usage: '/mcp-auth [your-api-key]',
+			// 		},
+			// 		'/disconnect': {
+			// 			description: 'Disconnect from MCP server',
+			// 			usage: '/disconnect',
+			// 		},
+			// 		'/help': {
+			// 			description: 'Shows available commands and their usage.',
+			// 			usage: '/help',
+			// 		},
+			// 	};
 				
-				// Override with MCP commands
-				availableCommands = mcpCommands;
-			}
+			// 	// Override with MCP commands
+			// 	availableCommands = mcpCommands;
+			// }
 
 			// Filter commands that match the current input
 			const filtered = Object.entries(availableCommands).reduce(
