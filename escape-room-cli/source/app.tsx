@@ -20,6 +20,7 @@ interface UserData {
 	name: string;
 	email?: string;
 	apiKey?: string;
+	userId?: string;
 }
 
 export default function App({ name = '', email = '', register = false }: Props) {
@@ -74,8 +75,9 @@ export default function App({ name = '', email = '', register = false }: Props) 
 					</Box> */}
 
 					<Terminal 
-						mode={'standard'} 
+						// mode={'standard'} 		
 						apiKey={userData.apiKey} 
+						userId={userData.userId}
 					/>
 				</>
 			)}

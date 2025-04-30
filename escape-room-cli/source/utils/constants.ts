@@ -43,6 +43,18 @@ export const COMMANDS: CommandCollection = {
 	'/restart': {
 		description: 'Restart the game',
 		usage: '/restart',
+	},
+	'/model': {
+		description: 'Change AI model',
+		usage: '/model',
+	},
+	'/mcp': {
+		description: 'Switch to MCP client mode',
+		usage: '/mcp',
+	},
+	'/exit-mcp': {
+		description: 'Exit MCP client mode',
+		usage: '/exit-mcp',
 	}
 };
 // -----------------------------------------------------------------------------

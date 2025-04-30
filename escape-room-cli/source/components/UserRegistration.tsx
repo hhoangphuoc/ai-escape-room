@@ -7,7 +7,7 @@ import path from 'path';
 import os from 'os';
 
 interface UserRegistrationProps {
-  onRegistrationComplete: (userData: { name: string; email?: string; apiKey?: string }) => void;
+  onRegistrationComplete: (userData: { name: string; email?: string; apiKey?: string; userId?: string }) => void;
   username?: string;
   email?: string;
 }
@@ -18,6 +18,7 @@ interface UserConfig {
   name: string;
   email?: string;
   registeredAt: string;
+  userId?: string; // Add userId from backend
   apiKeys?: {
     anthropic?: string;
     openai?: string;
@@ -36,7 +37,7 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
   const [apiKey, setApiKey] = useState<string>('');
   const [message, setMessage] = useState<string>('');
 
-  // Load API keys from environment variables
+  // Load API keys from environment variables and authenticate with backend if user exists
   useEffect(() => {
     const anthropicKey = process.env['ANTHROPIC_API_KEY'];
     const openaiKey = process.env['OPENAI_API_KEY'];
@@ -63,12 +64,32 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
             setApiKey(configData.apiKeys.openai);
           }
           
+          // Try to authenticate with backend if we have userId
+          if (configData.userId) {
+            // Asynchronously authenticate, but don't block loading
+            fetch('http://localhost:3001/api/users/auth', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userId: configData.userId })
+            })
+            .then(response => response.json())
+            .then(data => {
+              console.log('Authentication successful:', data);
+              // Continue silently
+            })
+            .catch(error => {
+              console.error('Error authenticating with backend:', error);
+              // Continue silently - authentication is not critical for app functionality
+            });
+          }
+          
           // Skip to completion
           setStep('complete');
           onRegistrationComplete({ 
             name: configData.name, 
             email: configData.email,
-            apiKey: configData.apiKeys?.anthropic || configData.apiKeys?.openai
+            apiKey: configData.apiKeys?.anthropic || configData.apiKeys?.openai,
+            userId: configData.userId
           });
           return;
         } else if (configData.name) {
@@ -104,11 +125,36 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
     setMessage('Saving your information...');
     
     try {
+      // Register with backend
+      let userId: string | undefined;
+      try {
+        const response = await fetch('http://localhost:3001/api/users/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            email: userEmail,
+            apiKey: apiKey,
+            provider: apiKeyProvider
+          })
+        });
+        
+        const data = await response.json();
+        if (data.userId) {
+          userId = data.userId;
+          setMessage('Connected to backend server!');
+        }
+      } catch (error) {
+        console.error('Error connecting to backend:', error);
+        setMessage('Could not connect to backend server. Saving locally only.');
+      }
+      
       // Create config object
       const config: UserConfig = {
         name,
         registeredAt: new Date().toISOString(),
-        apiKeys: {}
+        apiKeys: {},
+        userId
       };
       
       if (userEmail) {
@@ -131,7 +177,8 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
       onRegistrationComplete({ 
         name, 
         email: userEmail,
-        apiKey: apiKey 
+        apiKey: apiKey,
+        userId
       });
     } catch (error) {
       console.error('Error saving config:', error);

@@ -7,6 +7,7 @@ export interface GameObject {
   
   export interface Room {
     name: string;
+    background: string;
     objects: Record<string, GameObject>;
     password: string;
   }
@@ -14,6 +15,7 @@ export interface GameObject {
   export const ROOM_OBJECTS: Record<number, Room> = {
     1: {
       name: "The Foyer of Fading Secrets",
+      background: "You are in the foyer of a mansion. The walls are covered in old wallpaper, and the floor is covered in a thick layer of dust. The air is thick with the scent of old wood and mold.",
       objects: {
         manual: {
           name: "Manual",
@@ -47,6 +49,7 @@ export interface GameObject {
     },
     2: {
       name: "The Study of Shadows",
+      background: "You are in a study of a mansion. The walls are covered in old wallpaper, and the floor is covered in a thick layer of dust. The air is thick with the scent of old wood and mold.",
       objects: {
         diary: {
           name: "Diary",
@@ -80,6 +83,7 @@ export interface GameObject {
     },
     3: {
       name: "The Crypt of Coded Whispers",
+      background: "You are in a crypt of a mansion. The walls are covered in old wallpaper, and the floor is covered in a thick layer of dust. The air is thick with the scent of old wood and mold.",
       objects: {
         radio: {
           name: "Radio Transceiver",

@@ -4,7 +4,26 @@ import cors from 'cors';
 import bodyParser from 'body-parser';
 import { ROOM_OBJECTS, type Room, type GameObject } from '../constant/objects'; // Adjust path as necessary
 import { RoomAgent, type RoomCommandResponse } from '../agents/RoomAgent';
+import OpenAI from 'openai';
+import dotenv from 'dotenv';
 
+// Load environment variables
+dotenv.config();
+
+//-------------------------------- USER DATA --------------------------------
+interface User {
+  id: string;
+  name: string;
+  email?: string;
+  apiKeys?: {
+    anthropic?: string;
+    openai?: string;
+  };
+  registeredAt: string;
+}
+
+// In-memory user store (replace with DB in production)
+const users: Record<string, User> = {};
 
 //-------------------------------- CUSTOM GAME DATA --------------------------------
 interface CustomGameData {
@@ -328,12 +347,194 @@ app.post('/room/unlock', (req, res) => {
     }
 });
 
+// --- User Management Endpoints ---
+
+// Register user endpoint
+app.post('/api/users/register', ((req: Request, res: Response) => {
+  const { name, email, apiKey, provider = 'openai' } = req.body;
+  
+  if (!name) {
+    return res.status(400).json({ error: 'Name is required' });
+  }
+  
+  const userId = Date.now().toString();
+  
+  users[userId] = {
+    id: userId,
+    name,
+    email,
+    apiKeys: apiKey ? { [provider]: apiKey } : undefined,
+    registeredAt: new Date().toISOString()
+  };
+  
+  console.log(`API: User registered: ${name} (${userId})`);
+  
+  res.json({ 
+    userId,
+    user: { name, email }
+  });
+}) as any);
+
+// Authenticate user endpoint
+app.post('/api/users/auth', ((req: Request, res: Response) => {
+  const { userId } = req.body;
+  
+  if (!userId || !users[userId]) {
+    return res.status(401).json({ error: 'User not found' });
+  }
+  
+  // Return user data (excluding API keys)
+  const { apiKeys, ...userData } = users[userId];
+  
+  console.log(`API: User authenticated: ${userData.name} (${userId})`);
+  
+  res.json({ 
+    authenticated: true,
+    user: userData
+  });
+}) as any);
+
+// Get API key - secure endpoint that returns the API key for a given user and provider
+app.post('/api/users/get-api-key', ((req: Request, res: Response) => {
+  const { userId, provider = 'openai' } = req.body;
+  
+  if (!userId || !users[userId]) {
+    return res.status(401).json({ error: 'User not found' });
+  }
+  
+  const user = users[userId];
+  const apiKey = user.apiKeys?.[provider];
+  
+  if (!apiKey) {
+    return res.status(404).json({ error: `No API key found for provider: ${provider}` });
+  }
+  
+  console.log(`API: API key retrieved for user: ${user.name} (${userId}), provider: ${provider}`);
+  
+  res.json({ 
+    apiKey,
+    provider
+  });
+}) as any);
+
+// --- Chat Endpoint ---
+app.post('/api/chat', (async (req: Request, res: Response) => {
+  const { message, currentRoom, model } = req.body;
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'API key is required' });
+  }
+  
+  const apiKey = authHeader.substring(7); // Remove 'Bearer ' prefix
+  
+  try {
+    // Get current room context
+    const room = getCurrentRoomData();
+    const roomContext = `You are in ${room.name}. ${room.background || ''}`;
+    const objectsContext = Object.values(room.objects)
+      .map((o: GameObject) => `${o.name}: ${o.description}`)
+      .join('\n');
+    
+    // Determine if it's an OpenAI or Anthropic model
+    console.log(`API: Processing chat message with model: ${model}`);
+    
+    let response;
+    const model_specs = {
+      'gpt-4o': {
+        max_completion_tokens: 4098,
+      },
+      'gpt-4o-mini': {
+        max_completion_tokens: 1024,
+      },
+      'gpt-4.1':{
+        max_completion_tokens: 4098,
+      },
+      'o3': {
+        reasoning_effort: "medium",
+      },
+      'o3-mini': {
+        reasoning_effort: "medium",
+      },
+      'o4-mini':{
+        reasoning_effort: "medium",
+      },
+      'claude-3-7-sonnet': {
+        max_completion_tokens: 4098,
+      }
+    }
+    if (model.startsWith('gpt') || model.startsWith('o')) {
+      // OpenAI models
+      const openai = new OpenAI({ apiKey });
+      response = await openai.chat.completions.create({
+        model,
+        messages: [
+          {
+            role: "system",
+            content: `You are an AI assistant in an escape room game. Help the player solve puzzles without giving away solutions directly.
+                    Current room information:
+                    ${roomContext}
+                    Objects in room:
+                    ${objectsContext}
+                    `
+          },
+          { role: "user", content: message }
+        ],
+        ...model_specs[model] // Add model-specific parameters
+      });
+      res.json({ response: response.choices[0].message.content });
+
+      //TODO: TRY WITH `openai.responses.create` ----------------------------------------------------------------
+      // response = await openai.responses.create({
+      //   model: model,
+      //   input: [
+      //       { role: "system", content: `You are an AI assistant in an escape room game. Help the player solve puzzles without giving away solutions directly.
+      //       Current room information:
+      //       ${roomContext}
+      //       Objects in room:
+      //       ${objectsContext}` },
+      //       { role: "user", content: message }
+      //   ],
+      //   reasoning: {
+      //     effort: model_specs[model].reasoning_effort,
+      //     summary: "auto",
+      //   },
+      //   tools: [],
+      //   store: false
+      // })
+      //---------------------------------------------------------------------------------------------------------
+    } else {
+      // Anthropic models (Claude)
+      const Anthropic = require('@anthropic-ai/sdk').default;
+      const anthropic = new Anthropic({ apiKey });
+      response = await anthropic.messages.create({
+        model,
+        max_tokens: 500,
+        system: `You are an AI assistant in an escape room game. Help the player solve puzzles without giving away solutions directly.
+                  Current room information:
+                  ${roomContext}
+                  Objects in room:
+                  ${objectsContext}
+                `,
+        messages: [{ role: "user", content: message }]
+      });
+      
+      res.json({ response: response.content[0].text });
+    }
+  } catch (error) {
+    console.error('Error processing chat:', error);
+    res.status(500).json({ 
+      error: 'Error processing chat request',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+}) as any);
+
 // --- Error Handling Middleware (Basic) ---
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
     console.error("Unhandled API Error:", err.stack);
     res.status(500).json({ error: 'An internal server error occurred.' });
 });
-
 
 // --- Start Server ---
 app.listen(port, () => {

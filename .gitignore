@@ -4,3 +4,5 @@
 # Environment variables
 .env
 CLAUDE.md
+codex
+**/CLAUDE.local.md

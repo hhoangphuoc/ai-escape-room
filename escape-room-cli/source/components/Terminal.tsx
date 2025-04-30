@@ -6,13 +6,13 @@ import CommandHistory from './CommandHistory.js';
 import ScrollableBox from './ScrollableBox.js';
 import Gradient from 'ink-gradient';
 import ModelSelector from './ModelSelector.js';
+import McpClientUI from './McpClientUI.js';
 import { ModelOption, MODELS_COLLECTION } from '../utils/constants.js';
-// import {MCPClient} from '../../mcp/index.js'
-// import Anthropic from '@anthropic-ai/sdk';
 
 interface TerminalProps {
-	mode: 'standard' | 'mcp';
+	// mode: 'standard' | 'mcp';
 	apiKey?: string;
+	userId?: string;
 }
 
 // Define type for history items
@@ -21,7 +21,7 @@ type HistoryItem = {
 	text: string;
 };
 
-const Terminal: React.FC<TerminalProps> = ({ mode, apiKey }) => {
+const Terminal: React.FC<TerminalProps> = ({ apiKey, userId }) => {
 	const [history, setHistory] = useState<Array<HistoryItem>>([]);
 	const [currentCommand, setCurrentCommand] = useState('');
 	const [isConnected, setIsConnected] = useState(false);
@@ -33,89 +33,116 @@ const Terminal: React.FC<TerminalProps> = ({ mode, apiKey }) => {
 	const [selectedModel, setSelectedModel] = useState<ModelOption>(Object.values(MODELS_COLLECTION)[0] as ModelOption); // Default to first model
 
 	// MCP RELATED STATE ------------------------------------------------------------
-	// const [mcpConnected, setMcpConnected] = useState(false);
-	// const [apiKey, setApiKey] = useState<string | null>(null);
-	// const [mcpClient, setMcpClient] = useState<MCPClient | null>(null);
-	// const [mcpTools, setMcpTools] = useState<string[]>([]);
+	const [mcpMode, setMcpMode] = useState(false);
+	const [showMcpClient, setShowMcpClient] = useState(false);
 	// -----------------------------------------------------------------------------
 
-  // Track current room
-  const [currentRoom, setCurrentRoom] = useState(1);
-  const [currentRoomName, setCurrentRoomName] = useState('');
-  const [currentRoomBackground, setCurrentRoomBackground] = useState('');
+	// Track current room
+	const [currentRoom, setCurrentRoom] = useState(1);
+	const [currentRoomName, setCurrentRoomName] = useState('');
+	const [currentRoomBackground, setCurrentRoomBackground] = useState('');
 
-  // Check if we have API capability for LLM interactions
-  useEffect(() => {
-    setHasAICapability(!!apiKey || !!process.env['ANTHROPIC_API_KEY'] || !!process.env['OPENAI_API_KEY']);
-  }, [apiKey]);
+	// Check if we have API capability for LLM interactions
+	useEffect(() => {
+		setHasAICapability(!!apiKey || !!process.env['ANTHROPIC_API_KEY'] || !!process.env['OPENAI_API_KEY']);
+	}, [apiKey]);
+	// --------------------------------------------------------------------------------------------
 
-  // Send input to the RoomAgent backend
-  const sendAgentInput = async (input: string): Promise<string> => {
-    try {
-      const response = await fetch(
-        `http://localhost:3001/api/rooms/${currentRoom}/command`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ input }),
-        }
-      );
-      const data = await response.json();
-      let text = data.response;
-      if (data.unlocked) {
-        text += `\nCorrect! Moving to room ${currentRoom + 1}.`;
-        setCurrentRoom(prev => prev + 1);
-      }
-      return text;
-    } catch (err) {
-      console.error('Error communicating with RoomAgent:', err);
-      return 'Error communicating with room agent.';
-    }
-  };
+	// Check backend connection
+	const checkBackendConnection = async () => {
+		try {
+			const controller = new AbortController();
+			const timeoutId = setTimeout(() => controller.abort(), 1000);
 
-  // Process natural language input through an LLM if API key is available
-  const processNaturalLanguage = async (text: string): Promise<string> => {
-    if (!hasAICapability) {
-      return "No API key configured. Please set ANTHROPIC_API_KEY or OPENAI_API_KEY environment variable to enable AI assistance.";
-    }
+			const response = await fetch('http://localhost:3001/api/health', {
+				method: 'GET',
+				headers: { 'Content-Type': 'application/json' },
+				signal: controller.signal,
+			});
 
-    setIsLoading(true);
-    setLoadingMessage(`Cooking with ${selectedModel.label}...`);
+			clearTimeout(timeoutId);
+			setIsConnected(response.ok);
+		} catch (error) {
+			setIsConnected(false);
+			console.error('Backend connection error:', error);
+		}
+	};
 
-    try {
-      // For now, we'll use a simple fetch to a local API endpoint
-      // In a real implementation, you'd use the respective SDKs
-      const response = await fetch('http://localhost:3001/api/chat', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey || process.env['ANTHROPIC_API_KEY'] || process.env['OPENAI_API_KEY']}`
-        },
-        body: JSON.stringify({ 
-          message: text,
-          currentRoom: currentRoom,
-          model: selectedModel.value
-        }),
-      });
+	// Send input to the RoomAgent backend
+	const sendAgentInput = async (input: string): Promise<string> => {
+		try {
+		const response = await fetch(
+			`http://localhost:3001/api/rooms/${currentRoom}/command`,
+			{
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ input }),
+			}
+		);
+		const data = await response.json();
+		let text = data.response;
+		if (data.unlocked) {
+			text += `\nCorrect! Moving to room ${currentRoom + 1}.`;
+			setCurrentRoom(prev => prev + 1);
+		}
+		return text;
+		} catch (err) {
+		console.error('Error communicating with RoomAgent:', err);
+		return 'Error communicating with room agent.';
+		}
+	};
 
-      const data = await response.json();
-      return data.response || "I couldn't understand that. Please try a different command.";
-    } catch (error) {
-      console.error('Error processing natural language:', error);
-      return "Error processing your request. Try using direct commands like /look, /inspect, etc.";
-    } finally {
-      setIsLoading(false);
-      setLoadingMessage('');
-    }
-  };
+	// Process natural language input through an LLM if API key is available
+	const processNaturalLanguage = async (text: string): Promise<string> => {
+		if (!hasAICapability) {
+		return "No API key configured. Please set ANTHROPIC_API_KEY or OPENAI_API_KEY environment variable to enable AI assistance.";
+		}
 
-  // Handle model selection
-  const handleModelSelect = (model: ModelOption) => {
-    setSelectedModel(model);
-    return `Model changed to ${model.label}. ${model.description || ''}`;
-  };
+		setIsLoading(true);
+		setLoadingMessage(`Cooking with ${selectedModel.label}...`);
 
-  // Add initial welcome message
+		try {
+		// Use our backend API chat endpoint
+		const response = await fetch('http://localhost:3001/api/chat', {
+			method: 'POST',
+			headers: { 
+			'Content-Type': 'application/json',
+			'Authorization': `Bearer ${apiKey || process.env['ANTHROPIC_API_KEY'] || process.env['OPENAI_API_KEY']}`
+			},
+			body: JSON.stringify({ 
+			message: text,
+			currentRoom: currentRoom,
+			model: selectedModel.value,
+			userId: userId // Include userId if we have it
+			}),
+		});
+
+		if (!response.ok) {
+			const errorData = await response.json();
+			console.error('API error:', errorData);
+			return `Sorry, there was an error processing your request: ${errorData.error || 'Unknown error'}`;
+		}
+
+		const data = await response.json();
+		return data.response || "I couldn't understand that. Please try a different command.";
+		} catch (error) {
+		console.error('Error processing natural language:', error);
+		return "Error processing your request. The backend server may not be running. Try using direct commands like /look, /inspect, etc.";
+		} finally {
+		setIsLoading(false);
+		setLoadingMessage('');
+		}
+	};
+
+	// Handle model selection ------------------------------------------------------------
+	const handleModelSelect = (model: ModelOption) => {
+		setSelectedModel(model);
+		return `Model changed to ${model.label}. ${model.description || ''}`;
+	};
+	// --------------------------------------------------------------------------------------------
+  
+
+	// Welcome Message
 	useEffect(() => {
 		// Check connection to backend
 		checkBackendConnection();
@@ -131,28 +158,11 @@ const Terminal: React.FC<TerminalProps> = ({ mode, apiKey }) => {
 
 		return () => clearTimeout(timer);
 	}, [hasAICapability]);
+	// --------------------------------------------------------------------------------------------
+	// 						COMMAND HANDLERS HELPER FUNCTIONS
+	// --------------------------------------------------------------------------------------------
 
-		// Check backend connection
-		const checkBackendConnection = async () => {
-			try {
-				const controller = new AbortController();
-				const timeoutId = setTimeout(() => controller.abort(), 1000);
-	
-				const response = await fetch('http://localhost:3001/api/health', {
-					method: 'GET',
-					headers: { 'Content-Type': 'application/json' },
-					signal: controller.signal,
-				});
-	
-				clearTimeout(timeoutId);
-				setIsConnected(response.ok);
-			} catch (error) {
-				setIsConnected(false);
-				console.error('Backend connection error:', error);
-			}
-		};
-	//-----------------------------------------------------------------------------------------
-	// Handle help command locally for standard mode
+	// `/help`
 	const handleHelpCommand = () => {
 		return [
 		'Available commands:',
@@ -165,6 +175,7 @@ const Terminal: React.FC<TerminalProps> = ({ mode, apiKey }) => {
 		'/newgame - Start a new AI-generated escape room',
 		'/history - Show command history',
 		'/model - Change AI model',
+		'/mcp - Switch to MCP client mode (NOT IMPLEMENTED YET)',
 
 		...(hasAICapability ? [
 			'\n',
@@ -174,7 +185,8 @@ const Terminal: React.FC<TerminalProps> = ({ mode, apiKey }) => {
 		`Current room: ${currentRoom}`
 		].join('\n');
 	};
-	
+
+	// `/newgame`
 	// Handle generating a new game using the RoomAgent API
 	const handleGenerateNewGame = async (): Promise<string> => {
 		try {
@@ -205,7 +217,47 @@ const Terminal: React.FC<TerminalProps> = ({ mode, apiKey }) => {
 		}
 	};
 
-	// Main command handler
+	// `/mcp`
+	const handleMcpCommand = async (command: string): Promise<string> => {
+		if (command === '/exit-mcp' || command === '/standard') {
+			setMcpMode(false);
+			setShowMcpClient(false);
+			return "Exiting MCP mode and returning to standard mode.";
+		}
+		
+		if (command === '/help') {
+			return [
+				"MCP Mode Commands:",
+				"/exit-mcp - Exit MCP mode and return to standard mode",
+				"/help - Show this help message",
+				"",
+				"MCP Tools:",
+				"/start_new_game - Start a new game",
+				"/seek_objects - List objects in the current room",
+				"/analyse_object [object] - Examine an object in detail",
+				"/submit_password [password] - Submit a password to try to unlock the room"
+			].join("\n");
+		}
+		
+		// Forward the command to MCP component
+		// In a real implementation, we'd call a method on the McpClientUI component
+		return `MCP command processing not fully implemented yet: ${command}`;
+	};
+
+	// Handle Model Selector -----------------------------------------------------------------------
+	const handleCloseModelSelector = () => {
+		setShowModelSelector(false);
+	};
+	const handleSelectModel = (model: ModelOption) => {
+		const response = handleModelSelect(model);
+		setHistory(prev => [...prev, { type: 'response', text: response }]);
+	};
+	// --------------------------------------------------------------------------------------------
+
+
+	// --------------------------------------------------------------------------------------------
+	// 								MAIN COMMAND HANDLER
+	// --------------------------------------------------------------------------------------------
 	const handleCommand = async (command: string) => {
 		// If model selector is shown, don't process commands
 		if (showModelSelector) {
@@ -225,16 +277,17 @@ const Terminal: React.FC<TerminalProps> = ({ mode, apiKey }) => {
 			const response = 'Switching to MCP client mode...';
 			setHistory(prev => [...prev, { type: 'response', text: response }]);
 			// Switch to MCP mode
+			setMcpMode(true);
+			setShowMcpClient(true);
 			return;
 		}
 
 		// Process the command based on current mode
 		let response: string;
 
-		if (mode === 'mcp') {
-			
-		// Handle commands in MCP mode
-		//   response = await handleMcpCommand(command);
+		if (mcpMode) {
+			// Handle commands in MCP mode
+			response = await handleMcpCommand(command);
 		} else {
 		// Handle commands in standard mode (RoomAgent)
 		// Check if it's a slash command or natural language
@@ -299,32 +352,23 @@ const Terminal: React.FC<TerminalProps> = ({ mode, apiKey }) => {
 		// Add response to history
 		setHistory(prev => [...prev, { type: 'response', text: response }]);
 	};
-
-	// Handle closing the model selector
-	const handleCloseModelSelector = () => {
-		setShowModelSelector(false);
-	};
-
-	// Handle selecting a model
-	const handleSelectModel = (model: ModelOption) => {
-		const response = handleModelSelect(model);
-		setHistory(prev => [...prev, { type: 'response', text: response }]);
-	};
-
+	// ---------------------------------------------------------------------------------------------
+	
+	//RENDER COMPONENT
 	return (
 		<Box flexDirection="column" width="100%">
 			<Box marginBottom={1}>
-				<Text bold color={mode === 'standard' ? 'green' : 'magenta'}>
-					[{mode === 'standard' ? 'Standard Mode' : 'MCP Client Mode'}]
+				<Text bold color={mcpMode ? 'magenta' : 'green'}>
+					[{mcpMode ? 'MCP Client Mode' : 'Standard Mode'}]
 				</Text>
-				{/* {mode === 'mcp' && (
+				{mcpMode && showMcpClient && (
 					<Box marginLeft={1}>
-						<Text color={mcpConnected ? 'green' : 'red'}>
-							{mcpConnected ? '✓ Connected' : '✗ Not Connected'}
+						<Text color="cyan">
+							Type /help for available MCP commands
 						</Text>
 					</Box>
-				)} */}
-				{hasAICapability && (
+				)}
+				{hasAICapability && !mcpMode && (
 					<Box marginLeft={1}>
 						<Text color="green">
 							✓ AI Assistance Enabled ({selectedModel?.value})
@@ -344,7 +388,7 @@ const Terminal: React.FC<TerminalProps> = ({ mode, apiKey }) => {
 				</Box>
 			)}
 			
-			{mode === 'standard' && !isLoading && !showModelSelector && (
+			{!mcpMode && !isLoading && !showModelSelector && (
 				<Box flexDirection="column" marginBottom={1}>
 					<Gradient name="vice">
 						<Text bold color="cyan">{currentRoomName}</Text>
@@ -359,8 +403,28 @@ const Terminal: React.FC<TerminalProps> = ({ mode, apiKey }) => {
 					onSelect={handleSelectModel} 
 					onClose={handleCloseModelSelector} 
 				/>
+			) : showMcpClient ? (
+				<>
+					{/* MCP CLIENT UI - FOR MCP MODE */}
+					<McpClientUI 
+						// userId={userId}
+						onMessage={(message) => setHistory(prev => [...prev, { type: 'response', text: message }])}
+					/>
+					<ScrollableBox height={20}>
+						<CommandHistory history={history} showHistory={showHistory} />
+					</ScrollableBox>
+					<Box marginTop={1}>
+						<CommandInput
+							value={currentCommand}
+							onChange={setCurrentCommand}
+							onSubmit={handleCommand}
+							mode={mcpMode ? 'mcp' : 'standard'}
+						/>
+					</Box>
+				</>
 			) : (
 				<>
+					{/* COMMAND HISTORY - FOR BOTH MCP AND STANDARD MODE */}
 					<ScrollableBox height={25}>
 						<CommandHistory history={history} showHistory={showHistory} />
 					</ScrollableBox>
@@ -370,13 +434,13 @@ const Terminal: React.FC<TerminalProps> = ({ mode, apiKey }) => {
 							value={currentCommand}
 							onChange={setCurrentCommand}
 							onSubmit={handleCommand}
-							mode={mode}
+							mode={mcpMode ? 'mcp' : 'standard'}
 						/>
 					</Box>
 				</>
 			)}
 
-			{mode === 'standard' && !isConnected && !showModelSelector && (
+			{!mcpMode && !isConnected && !showModelSelector && (
 				<Box marginTop={1}>
 					<Text color="red">
 						⚠ Backend server not connected - run backend with 'cd ../backend && npm
