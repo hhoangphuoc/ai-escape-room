@@ -49,11 +49,7 @@ export const USER_COMMANDS: CommandCollection = {
     '/newgame': {
         description: 'Creates a completely new AI-generated escape room.',
         usage: '/newgame'
-    },
-    '/create-game': {
-        description: 'Creates a simple custom game with one room.',
-        usage: '/create-game "Concept Name" "object1,object2,..." "password(optional)"'
-    },
+    }
 }
 
 // Typed TOOL_CONCEPTS

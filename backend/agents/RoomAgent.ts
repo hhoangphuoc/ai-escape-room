@@ -2,13 +2,43 @@ import axios from 'axios';
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
 import { SYSTEM_PROMPT, USER_MESSAGE } from '../constant/prompts';
-
+import { ROOM_OBJECTS } from '../constant/objects'; // Ensure ROOM_OBJECTS is imported
+// import { v4 as uuidv4 } from 'uuid';
 dotenv.config();
 
 // Response shape for commands
 export interface RoomCommandResponse {
-  response: string;
+  // Raw structured data for client-side formatting
+  data: {
+    message?: string;           // Raw message content
+    room?: {                    // Room information
+      id: number;
+      name: string;
+      sequence?: number;        // Position in a multi-room sequence (1-3)
+      background?: string;
+    };
+    objects?: string[];         // List of object names
+    object?: {                  // Specific object details
+      name: string;
+      description: string;
+      details: string[] | string;
+    };
+    unlocked?: boolean;         // Whether a room was unlocked
+    nextRoom?: {                // Next room if applicable
+      id: number;
+      name: string;
+    };
+    gameCompleted?: boolean;    // Whether game is completed
+    hint?: {                    // Hint information
+      source: string;           // Which object provided the hint
+      content: string;          // The hint content
+    };
+  };
+  
+  // Legacy fields for backward compatibility
+  response?: string;
   unlocked?: boolean;
+  roomId?: number;             // Room ID in a sequence
 }
 
 // Structure of a generated room
@@ -27,171 +57,255 @@ export interface RoomCommandResponse {
  * }
  */
 
-interface LLMRoomData {
+export interface RoomData {
+  id?: number; // Optional ID
+  sequence?: number | null; // Optional sequence number
   name: string;
   background: string;
   password: string;
-  objects: Array<{
-    name: string;
-    description: string;
-    details: string[];
-  }>;
+  // Allow objects to be an array or a record
+  objects: RoomObject[] | Record<string, RoomObject>;
+}
+
+export interface RoomObject {
+  name: string;
+  description: string;
+  details: string[];
 }
 
 export class RoomAgent {
-  private id: number;
-  private locked: boolean = true;
+  private roomId: number;
+  private sequence: number | null;
+  private totalRooms: number | null;
+  private roomData: RoomData | null = null;
   private initPromise: Promise<void>;
-  
-  // Change from private to public to allow access from server.ts
-  public roomData!: LLMRoomData;
+  private isGenerating: boolean = false; // Flag to prevent concurrent generation
 
-  constructor(id: number) {
-    this.id = id;
-    // Begin asynchronous generation
-    this.initPromise = this.generateRoom();
+  constructor(roomId: number, sequence?: number | null, totalRooms?: number | null) {
+    this.roomId = roomId;
+    this.sequence = sequence ?? null;
+    this.totalRooms = totalRooms ?? null;
+    this.initPromise = this.initializeAgent();
   }
 
-  // Generate the escape room details via OpenAI
-  private async generateRoom(): Promise<void> {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error('OPENAI_API_KEY not set');
-
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-
-
-    const res = await openai.chat.completions.create({
-      model: 'gpt-4-1106-preview',
-      messages: [
-        {
-          role: "system",
-          content: SYSTEM_PROMPT
-        },
-        {
-          role: "user",
-          content: USER_MESSAGE
-        }
-      ],
-      temperature: 1,
-      max_tokens: 2048,
-    });
-    try {
-      // Log the full response (carefully) to see its structure
-      console.log('OpenAI Response Structure:', 
-        JSON.stringify({
-          hasText: !!res.choices[0]?.message?.content,
-          textType: typeof res.choices[0]?.message?.content,
-          responseType: typeof res.choices[0]?.message?.content,
-        }, null, 2)
-      );
-      
-      // First, attempt to handle the case where res.text is an object instead of a string
-      if (res.choices[0]?.message?.content && typeof res.choices[0]?.message?.content === 'object') {
-        // Convert the full response to a string for debugging
-        console.log('Full Response:', JSON.stringify(res, null, 2));
-        
-        // Try to extract JSON content from the response
-        const jsonString = JSON.stringify(res.choices[0]?.message?.content);
-        
-        // Parse the JSON string into our room data
-        this.roomData = {
-          name: "Fallback Room",
-          background: "This is a fallback room generated when the API response couldn't be parsed correctly.",
-          password: "openai",
-          objects: [
-            {
-              name: "Error Note",
-              description: "A note explaining what went wrong.",
-              details: ["The OpenAI API response wasn't in the expected format."]
-            }
-          ]
-        };
-        
-        console.log('Using fallback room data due to unexpected API response format');
-      } else if (typeof res.choices[0]?.message?.content === 'string') {
-        // Handle the case where content is a string
-        const content = res.choices[0].message.content.trim();
-        
-        // Sometimes the API returns the JSON with markdown code blocks, so we need to clean it
-        let jsonContent = content;
-        
-        // Remove markdown code block syntax if present
-        if (content.startsWith('```json')) {
-          jsonContent = content.replace(/```json\n/, '').replace(/\n```$/, '');
-        } else if (content.startsWith('```')) {
-          jsonContent = content.replace(/```\n/, '').replace(/\n```$/, '');
-        }
-        console.log('Escape room content:', jsonContent);
-        
-        try {
-          this.roomData = JSON.parse(jsonContent) as LLMRoomData;
-        } catch (parseError) {
-          console.error('Error parsing JSON content:', parseError);
-          console.log('Content that failed to parse:', jsonContent);
-          throw parseError;
-        }
-      } else {
-        // In case res.text is undefined or null
-        throw new Error('OpenAI API response has no text content');
+  // Initialize: Load data for known rooms immediately
+  private async initializeAgent(): Promise<void> {
+    if (this.roomId in ROOM_OBJECTS) {
+      console.log(`Initializing pre-defined RoomAgent for ID: ${this.roomId}`);
+      // Make a deep copy to prevent modifications to the original constant
+      this.roomData = JSON.parse(JSON.stringify(ROOM_OBJECTS[this.roomId]));
+      // Assign ID and sequence if missing in the constant data
+      if (this.roomData) {
+          this.roomData.id = this.roomId;
+          this.roomData.sequence = this.sequence;
       }
-    } catch (err) {
-      console.error('Failed to parse room JSON:', err, 'Raw Response:', res);
-      // Create fallback room data to avoid breaking the application
-      this.roomData = {
-        name: "Error Room",
-        background: "This room was created when an error occurred.",
-        password: "error",
-        objects: [
-          {
-            name: "Error Note",
-            description: "A note explaining what went wrong.",
-            details: ["An error occurred while generating the room: " + err.message]
-          }
-        ]
-      };
+    } else {
+      console.log(`Custom RoomAgent ID: ${this.roomId}. Data will be generated on demand.`);
+      // For custom rooms, data is generated lazily by getSingleRoomData
     }
   }
 
-  // Handle commands: look, inspect, hint, guess
+  // Public getter for room data. Returns null if not yet loaded/generated.
+  public getRoomData(): RoomData | null {
+    return this.roomData;
+  }
+
+  // Ensures room data is available, generating it if necessary.
+  public async ensureRoomData(): Promise<RoomData | null> {
+      await this.initPromise; // Wait for initial sync load if any
+      if (this.roomData) {
+          return this.roomData;
+      }
+      // If it's a custom room and data isn't loaded, generate it now.
+      if (!(this.roomId in ROOM_OBJECTS)) {
+          return await this.generateSingleRoomData();
+      }
+      // Should not happen for default rooms if constructor logic is correct
+      return null;
+  }
+
+  // Generate room data using OpenAI (only for custom rooms)
+  // Renamed from getSingleRoomData to avoid confusion with the getter
+  private async generateSingleRoomData(): Promise<RoomData | null> {
+    // Prevent concurrent generation attempts for the same agent
+    if (this.isGenerating) {
+        console.warn(`Generation already in progress for RoomAgent ID: ${this.roomId}. Waiting...`);
+        // Basic wait mechanism (could be improved with a more robust lock/promise queue)
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return this.roomData; // Return data possibly generated by the other call
+    }
+    this.isGenerating = true;
+
+    console.log(`Generating room data for custom RoomAgent ID: ${this.roomId}`);
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      console.error('OPENAI_API_KEY not set');
+      this.setupFallbackRoom('API key not configured.');
+      this.isGenerating = false;
+      return this.roomData;
+    }
+    const openai = new OpenAI({ apiKey });
+
+    try {
+      let systemPrompt = SYSTEM_PROMPT; // Use default system prompt
+      let userPrompt = USER_MESSAGE; // Use default user message
+
+      if (this.sequence !== null && this.totalRooms !== null) {
+        systemPrompt = `You are designing Room ${this.sequence} of a ${this.totalRooms}-room escape game. Follow the main instructions but ensure the theme/difficulty fits this sequence number. ${SYSTEM_PROMPT}`;
+        userPrompt = `/generate_room_${this.sequence}_of_${this.totalRooms}`;
+        console.log(`Generating Room ${this.sequence}/${this.totalRooms} (ID: ${this.roomId})`);
+      } else {
+        console.log(`Generating single custom room (ID: ${this.roomId})`);
+      }
+
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o', // Or your preferred model
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
+        ],
+        response_format: { type: "json_object" },
+        temperature: 1,
+        max_tokens: 2048,
+      });
+
+      const content = response.choices[0]?.message?.content;
+      if (content) {
+        try {
+          const generatedData = JSON.parse(content);
+          if (generatedData.name && generatedData.background && generatedData.password && generatedData.objects) {
+            this.roomData = { ...generatedData, id: this.roomId, sequence: this.sequence };
+            console.log(`Successfully generated room data for ID: ${this.roomId}`);
+          } else {
+            console.error('Generated JSON lacks required fields for room ID:', this.roomId);
+            this.setupFallbackRoom('Generated JSON lacks required fields.');
+          }
+        } catch (parseError) {
+          console.error('Error parsing JSON content for room ID:', this.roomId, parseError);
+          console.log('Content that failed to parse:', content);
+          this.setupFallbackRoom('Failed to parse generated JSON.');
+        }
+      } else {
+        console.error('OpenAI response content is null for room ID:', this.roomId);
+        this.setupFallbackRoom('No content received from OpenAI.');
+      }
+    } catch (error) {
+      console.error('OpenAI API call failed for room ID:', this.roomId, error);
+      this.setupFallbackRoom('OpenAI API call failed.');
+    }
+
+    this.isGenerating = false;
+    return this.roomData;
+  }
+
+  private setupFallbackRoom(reason: string): void {
+    console.warn(`Setting up fallback room for ID ${this.roomId} due to: ${reason}`);
+    this.roomData = {
+      id: this.roomId,
+      sequence: this.sequence,
+      name: `Fallback Room ${this.sequence ?? this.roomId}`,
+      background: `This is a fallback room. Reason: ${reason}. The ID is ${this.roomId}.`,
+      password: "fallback123",
+      // Ensure objects format matches RoomData (array or record)
+      // Let's use array for fallback
+      objects: [
+        {
+          name: "Fallback Note",
+          description: "A note left behind due to an error.",
+          details: [
+            `An error occurred: ${reason}`,
+            `The password is \"fallback123\"`
+          ]
+        }
+      ]
+    };
+  }
+
+  // Process input command for the room
   public async process(input: string): Promise<RoomCommandResponse> {
-    await this.initPromise;
+    // Ensure room data is loaded/generated before processing commands
+    const currentRoomData = await this.ensureRoomData(); // Use the new ensure method
+
+    if (!currentRoomData) {
+      return { response: "Error: Room data could not be loaded or generated.", data: { message: "Error: Room data could not be loaded or generated." } };
+    }
+
     const cmd = input.trim();
     const lc = cmd.toLowerCase();
-    //TODO: Handle the /newgame command to generate a new room (RoomAgent)
-    if (lc === '/newgame') {
-      this.initPromise = this.generateRoom();
-      return { response: 'New game started.' };
+
+    // --- Command Handling Logic --- (Keep existing logic like /look, /inspect, /hint, /guess)
+    // Make sure to handle both array and record format for objects
+
+    if (lc === '/look') {
+        let objectList: string;
+        if (Array.isArray(currentRoomData.objects)) {
+            objectList = currentRoomData.objects.map(o => o.name).join('\n- ');
+        } else {
+            objectList = Object.values(currentRoomData.objects).map(o => o.name).join('\n- ');
+        }
+        return {
+            data: {
+                message: `You are in ${currentRoomData.name}${currentRoomData.sequence ? ` (Room ${currentRoomData.sequence} of ${this.totalRooms})` : ''}.\n\n${currentRoomData.background}\n\nLooking around, you see:\n- ${objectList}`,
+                room: { id: this.roomId, name: currentRoomData.name, sequence: this.sequence },
+                objects: Array.isArray(currentRoomData.objects) ? currentRoomData.objects.map(o => o.name) : Object.values(currentRoomData.objects).map(o => o.name)
+            }
+        };
     }
 
-    //------------------------------- GAME COMMANDS --------------------------------------------
-    if (lc === '/look') {
-      const names = this.roomData.objects.map(o => o.name).join(', ');
-      return { response: `You are in ${this.roomData.name}. You see: ${names}.` };
-    }
     if (lc.startsWith('/inspect ')) {
-      const target = cmd.substring(8).trim().toLowerCase();
-      const obj = this.roomData.objects.find(o => o.name.toLowerCase() === target);
-      if (!obj) return { response: `No object named '${target}' found.` };
-      const details = obj.details.join('\n');
-      return { response: `${obj.name}: ${obj.description}\n${details}` };
+        const target = cmd.substring(9).trim().toLowerCase();
+        let obj: RoomObject | undefined;
+        if (Array.isArray(currentRoomData.objects)) {
+            obj = currentRoomData.objects.find(o => o.name.toLowerCase() === target);
+        } else {
+            const key = Object.keys(currentRoomData.objects).find(k => currentRoomData.objects[k].name.toLowerCase() === target);
+            obj = key ? currentRoomData.objects[key] : undefined;
+        }
+
+        if (!obj) {
+            return { data: { message: `No object named '${target}' found.` } };
+        }
+        const details = Array.isArray(obj.details) ? obj.details.join('\n') : obj.details;
+        return { data: { message: `${obj.name}: ${obj.description}\n\n${details}`, object: obj } };
     }
+
     if (lc === '/hint') {
-      const objs = this.roomData.objects;
-      const obj = objs[Math.floor(Math.random() * objs.length)];
-      const clue = obj.details[Math.floor(Math.random() * obj.details.length)];
-      return { response: `Hint from ${obj.name}: ${clue}` };
+        let objArray: RoomObject[];
+        if (Array.isArray(currentRoomData.objects)) {
+            objArray = currentRoomData.objects;
+        } else {
+            objArray = Object.values(currentRoomData.objects);
+        }
+        if (objArray.length === 0) {
+            return { data: { message: "There are no objects to get hints from." } };
+        }
+        const obj = objArray[Math.floor(Math.random() * objArray.length)];
+        let clue = "No details available for this object.";
+        if (obj.details && obj.details.length > 0) {
+             clue = obj.details[Math.floor(Math.random() * obj.details.length)];
+        }
+        return { data: { message: `Hint from ${obj.name}: ${clue}`, hint: { source: obj.name, content: clue } } };
     }
+
     if (lc.startsWith('/guess ')) {
-      const guess = cmd.substring(6).trim();
-      if (guess === this.roomData.password) {
-        this.locked = false;
-        return { response: `Correct! The password '${guess}' unlocks the door.`, unlocked: true };
-      } else {
-        return { response: `Wrong password. Try again.` };
-      }
+        const guess = cmd.substring(7).trim();
+        if (guess.toLowerCase() === currentRoomData.password.toLowerCase()) {
+            const isLastRoom = this.sequence !== null && this.totalRooms !== null && this.sequence >= this.totalRooms;
+            const message = `Correct! The password '${currentRoomData.password}' unlocks the door.` + (isLastRoom ? ` Congratulations, you've completed the final room!` : '');
+            return {
+                data: {
+                    message: message,
+                    unlocked: true,
+                    gameCompleted: isLastRoom,
+                    room: { id: this.roomId, name: currentRoomData.name, sequence: this.sequence }
+                }
+            };
+        } else {
+            return { data: { message: `Wrong password. Try again.` } };
+        }
     }
-    //------------------------------- END GAME COMMANDS ------------------------------------------
-    return { response: `Unknown command '${cmd}'. Try /newgame, /look, /inspect <object>, /hint, or /guess <password>.` };
+
+    // Default response for unknown commands within the room context
+    return { data: { message: `Unknown command in room: '${cmd}'. Try /look, /inspect <object>, /hint, or /guess <password>.` } };
   }
 }
