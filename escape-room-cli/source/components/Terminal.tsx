@@ -21,12 +21,24 @@ type HistoryItem = {
 	text: string;
 };
 
+// Structure expected from backend game endpoints (subset)
+interface GameInfo {
+    id?: string | number;
+    name?: string;
+    background?: string;
+    currentRoom?: number; // Sequence number
+    totalRooms?: number;
+    mode?: string;
+    objectCount?: number;
+}
+
 const Terminal: React.FC<TerminalProps> = ({ apiKey, userId }) => {
 	const [history, setHistory] = useState<Array<HistoryItem>>([]);
 	const [currentCommand, setCurrentCommand] = useState('');
 	const [isConnected, setIsConnected] = useState(false);
 	const [showHistory, setShowHistory] = useState(false);
-	const [isLoading, setIsLoading] = useState(false);
+	const [isLoadingGame, setIsLoadingGame] = useState(false);
+	const [isProcessingCommand, setIsProcessingCommand] = useState(false);
 	const [loadingMessage, setLoadingMessage] = useState('');
 	const [hasAICapability, setHasAICapability] = useState<boolean>(!!apiKey);
 	const [showModelSelector, setShowModelSelector] = useState(false);
@@ -37,10 +49,13 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey, userId }) => {
 	const [showMcpClient, setShowMcpClient] = useState(false);
 	// -----------------------------------------------------------------------------
 
-	// Track current room
-	const [currentRoom, setCurrentRoom] = useState(1);
-	const [currentRoomName, setCurrentRoomName] = useState('');
-	const [currentRoomBackground, setCurrentRoomBackground] = useState('');
+	// Game State - Managed primarily by backend, reflected here
+	// const [currentRoom, setCurrentRoom] = useState(1); // Less relevant now
+    const [currentGameId, setCurrentGameId] = useState<string | number | null>(null);
+	const [currentRoomName, setCurrentRoomName] = useState('Loading...');
+	const [currentRoomBackground, setCurrentRoomBackground] = useState('Please wait or type /help.');
+    const [currentGameMode, setCurrentGameMode] = useState<'default' | 'single-custom' | 'multi-custom' | 'unknown'>('unknown');
+    const [totalRooms, setTotalRooms] = useState<number>(1);
 
 	// Check if we have API capability for LLM interactions
 	useEffect(() => {
@@ -62,47 +77,107 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey, userId }) => {
 
 			clearTimeout(timeoutId);
 			setIsConnected(response.ok);
+            if (response.ok) {
+                // Fetch initial game state if connected
+                fetchGameState();
+            } else {
+                setCurrentRoomName('Connection Error');
+                setCurrentRoomBackground('Could not connect to backend at http://localhost:3001.');
+            }
 		} catch (error) {
 			setIsConnected(false);
+            setCurrentRoomName('Connection Error');
+            setCurrentRoomBackground('Could not connect to backend. Is it running? Try: cd ../backend && npm run start');
 			console.error('Backend connection error:', error);
 		}
 	};
 
-	// Send input to the RoomAgent backend
-	const sendAgentInput = async (input: string): Promise<string> => {
-		try {
-		const response = await fetch(
-			`http://localhost:3001/api/rooms/${currentRoom}/command`,
-			{
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ input }),
-			}
-		);
-		const data = await response.json();
-		let text = data.response;
-		if (data.unlocked) {
-			text += `\nCorrect! Moving to room ${currentRoom + 1}.`;
-			setCurrentRoom(prev => prev + 1);
-		}
-		return text;
-		} catch (err) {
-		console.error('Error communicating with RoomAgent:', err);
-		return 'Error communicating with room agent.';
-		}
-	};
+    // Fetch current game state from backend
+    const fetchGameState = async () => {
+        try {
+            const response = await fetch('http://localhost:3001/game/state');
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            const data = await response.json();
+            setCurrentRoomName(data.roomName || 'Unknown Room');
+            // We might not get background from /game/state, maybe call /look?
+            // Or adjust backend /game/state to return more info?
+            // For now, just update name and mode
+            setCurrentGameMode(data.gameMode || 'unknown');
+
+        } catch (error) {
+            console.error("Error fetching game state:", error);
+            setCurrentRoomName('State Error');
+            setCurrentRoomBackground('Could not fetch current game state from backend.');
+        }
+    };
+
+	// Send generic command to the backend's /api/command endpoint
+    const sendCommand = async (command: string): Promise<string> => {
+        setIsProcessingCommand(true);
+        setLoadingMessage('Processing...');
+        let responseText = 'Error processing command.'; // Default error message
+
+        try {
+            const response = await fetch('http://localhost:3001/api/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: command }),
+            });
+
+            if (!response.ok) {
+                // Try to get error details from response body
+                try {
+                    const errorData = await response.json();
+                    responseText = `Error: ${errorData.response || response.statusText}`;
+                } catch { // Handle cases where body is not JSON or empty
+                    responseText = `Error: Received status ${response.status}`;
+                }
+                console.error('Command API error:', responseText);
+            } else {
+                const data = await response.json();
+                responseText = data.response || 'Action completed.';
+
+                // TODO: Check response data for state updates (e.g., room change)--------------------------------
+                // This depends on the backend /api/command returning structured data
+                // alongside the text response when needed.
+                // Example (adjust based on actual backend structure):
+                /*
+                if (data.data?.room) {
+                    setCurrentRoomName(data.data.room.name || 'Unknown Room');
+                    if(data.data.room.background) {
+                       setCurrentRoomBackground(data.data.room.background);
+                    }
+                    // Update other state if needed
+                }
+                if (data.data?.gameCompleted) {
+                    // Handle game completion message
+                }
+                */
+                // --------------------------------------------------------------------------------------------
+            }
+        } catch (err) {
+            console.error('Error sending command:', err);
+            responseText = 'Network error: Could not communicate with the backend.';
+            setIsConnected(false); // Assume connection lost
+        } finally {
+            setIsProcessingCommand(false);
+            setLoadingMessage('');
+        }
+        return responseText;
+    };
 
 	// Process natural language input through an LLM if API key is available
 	const processNaturalLanguage = async (text: string): Promise<string> => {
 		if (!hasAICapability) {
-		return "No API key configured. Please set ANTHROPIC_API_KEY or OPENAI_API_KEY environment variable to enable AI assistance.";
+		    return "No API key configured. Please set ANTHROPIC_API_KEY or OPENAI_API_KEY environment variable to enable AI assistance.";
 		}
 
-		setIsLoading(true);
+		setIsProcessingCommand(true);
 		setLoadingMessage(`Cooking with ${selectedModel.label}...`);
 
 		try {
-		// Use our backend API chat endpoint
 		const response = await fetch('http://localhost:3001/api/chat', {
 			method: 'POST',
 			headers: { 
@@ -111,9 +186,9 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey, userId }) => {
 			},
 			body: JSON.stringify({ 
 			message: text,
-			currentRoom: currentRoom,
+			// currentRoom: currentRoom, // Backend gets room state itself
 			model: selectedModel.value,
-			userId: userId // Include userId if we have it
+			userId: userId
 			}),
 		});
 
@@ -127,9 +202,9 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey, userId }) => {
 		return data.response || "I couldn't understand that. Please try a different command.";
 		} catch (error) {
 		console.error('Error processing natural language:', error);
-		return "Error processing your request. The backend server may not be running. Try using direct commands like /look, /inspect, etc.";
+		return "Error processing your request. The backend server may not be running or AI model failed.";
 		} finally {
-		setIsLoading(false);
+		setIsProcessingCommand(false);
 		setLoadingMessage('');
 		}
 	};
@@ -151,7 +226,6 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey, userId }) => {
 		const timer = setTimeout(() => {
 			setHistory([
 				{ type: 'response', text: 'Welcome to the Escape Room CLI!' },
-				{ type: 'response', text: 'Type /help to see available commands.' },
 				...(hasAICapability ? [{ type: 'response' as const, text: 'AI assistance is enabled! You can use natural language to interact with the game.' }] : []),
 			]);
 		}, 1000);
@@ -167,52 +241,65 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey, userId }) => {
 		return [
 		'Available commands:',
 		'/help - Show this help message',
-		'/look - Look around the room',
-		'/inspect [object] - Inspect an object for details',
-		'/guess [password] - Try a password to unlock',
-		'/hint - Get a hint',
-		'/restart - Restart the game',
-		'/newgame - Start a new AI-generated escape room',
+		'/look (or /seek) - Look around the room',
+		'/inspect [object] (or /analyse) - Inspect an object',
+		'/guess [password] (or /password) - Try a password',
+		'/hint - Get a hint (uses RoomAgent logic)',
+		// '/restart - Restart the current game (TODO: Implement backend support?)',
+        '/newgame [single-room|multi-room] - Start a new AI-generated game (default: single-room)',
 		'/history - Show command history',
-		'/model - Change AI model',
-		'/mcp - Switch to MCP client mode (NOT IMPLEMENTED YET)',
+        '/status - Show current game status (if supported by backend)',
+		'/model - Change AI model (if AI enabled)',
+		// '/mcp - Switch to MCP client mode (NOT IMPLEMENTED YET)',
 
 		...(hasAICapability ? [
-			'\n',
-			'AI assistance is enabled! Type natural language queries like "what do I see in this room?"',
+			'AI assistance is enabled! Type natural language queries.',
 			`Current AI model: ${selectedModel.label}`
 		] : []),
-		`Current room: ${currentRoom}`
+		`Current Room: ${currentRoomName} (${currentGameMode})`
 		].join('\n');
 	};
 
-	// `/newgame`
-	// Handle generating a new game using the RoomAgent API
-	const handleGenerateNewGame = async (): Promise<string> => {
+	// `/newgame [mode]`
+	const handleGenerateNewGame = async (mode: string = 'single-room'): Promise<string> => {
+        const requestedMode = (mode === 'multi-room') ? 'multi-room' : 'single-room';
 		try {
-			setIsLoading(true);
-			setLoadingMessage('Creating a new AI-generated escape room...');
+			setIsLoadingGame(true);
+			setLoadingMessage(`Preparing an AI-generated ${requestedMode} Escape Game...`);
 			
 			const response = await fetch('http://localhost:3001/api/newgame', {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json' }
+				headers: { 'Content-Type': 'application/json' },
+                // Send the requested mode
+                body: JSON.stringify({ mode: requestedMode })
 			});
 			
 			const data = await response.json();
 			
-			if (data.success) {
-				setCurrentRoom(99); // Set to the custom room ID
-				setCurrentRoomName(data.game.name);
-				setCurrentRoomBackground(data.game.background);
-				return `New game created!\n\nRoom: ${data.game.name}\n\n${data.game.background || ""}\n\nThis room contains ${data.game.objectCount} objects to examine. Use /look to see them.`;
+			if (data.success && data.game) {
+                const gameInfo: GameInfo = data.game;
+				// Update state based on response
+                setCurrentGameId(gameInfo.id || null);
+				setCurrentRoomName(gameInfo.name || 'Untitled Room');
+				setCurrentRoomBackground(gameInfo.background || 'No description provided.');
+                setCurrentGameMode(gameInfo.mode === 'multi-room' ? 'multi-custom' : 'single-custom');
+                setTotalRooms(gameInfo.totalRooms || 1);
+
+				return `
+					New ${gameInfo.mode || 'custom'} game created!
+					\nRoom ${gameInfo.currentRoom || 1}${gameInfo.totalRooms && gameInfo.totalRooms > 1 ? ` of ${gameInfo.totalRooms}` : ''}: ${gameInfo.name}
+					\n${gameInfo.background || ""}
+					\nThis room contains ${gameInfo.objectCount !== undefined ? gameInfo.objectCount : '?'} objects. Use /look to see them.
+					`;
 			} else {
 				return `Failed to create new game: ${data.error || "Unknown error"}`;
 			}
 		} catch (error) {
 			console.error('Error generating new game:', error);
+            setIsConnected(false); // Assume connection issue
 			return 'Error communicating with the server. Please ensure the backend is running.';
 		} finally {
-			setIsLoading(false);
+			setIsLoadingGame(false);
 			setLoadingMessage('');
 		}
 	};
@@ -306,30 +393,37 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey, userId }) => {
 					resp = handleHelpCommand();
 					break;
 				case '/look':
-					resp = await sendAgentInput('/look');
+					resp = await sendCommand('/look');
 					break;
 				case '/inspect':
 					if (parts.length < 2) resp = 'Usage: inspect [object]';
-					else resp = await sendAgentInput(`/inspect ${parts.slice(1).join(' ')}`);
+					else resp = await sendCommand(`/inspect ${parts.slice(1).join(' ')}`);
 					break;
 				case '/guess':
 					if (parts.length < 2) resp = 'Usage: guess [password]';
-					else resp = await sendAgentInput(`/guess ${parts.slice(1).join(' ')}`);
+					else resp = await sendCommand(`/guess ${parts.slice(1).join(' ')}`);
 					break;
 				case '/hint':
-					resp = await sendAgentInput('/hint');
+					resp = await sendCommand('/hint');
 					break;
 				case '/restart':
 					// Restart: go back to room 1
-					setCurrentRoom(1);
+					setCurrentRoomName('Restarting...');
+					setCurrentRoomBackground('The game is ended or not started yet.\nType /newgame to start a new game, or /help for available commands.');
 					resp = 'Game restarted. Back to Room 1.';
 					break;
 				case '/newgame':
-					resp = await handleGenerateNewGame();
+					// Extract mode if provided (e.g., /newgame multi-room)
+					const modeArg = parts[1]?.toLowerCase();
+					resp = await handleGenerateNewGame(modeArg);
 					break;
 				case '/history':
 					setShowHistory(true);
 					resp = 'Showing command history:';
+					break;
+				case '/status':
+					// Send /status command to backend (needs backend implementation)
+					resp = await sendCommand('/status');
 					break;
 				case '/model':
 					if (hasAICapability) {
@@ -357,44 +451,42 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey, userId }) => {
 	//RENDER COMPONENT
 	return (
 		<Box flexDirection="column" width="100%">
-			<Box marginBottom={1}>
-				<Text bold color={mcpMode ? 'magenta' : 'green'}>
-					[{mcpMode ? 'MCP Client Mode' : 'Standard Mode'}]
-				</Text>
-				{mcpMode && showMcpClient && (
-					<Box marginLeft={1}>
-						<Text color="cyan">
-							Type /help for available MCP commands
-						</Text>
-					</Box>
-				)}
-				{hasAICapability && !mcpMode && (
-					<Box marginLeft={1}>
-						<Text color="green">
-							✓ AI Assistance Enabled ({selectedModel?.value})
-						</Text>
-					</Box>
-				)}
+			<Box marginBottom={1} justifyContent="space-between">
+                <Box>
+                    <Text bold color={mcpMode ? 'magenta' : 'cyan'}>
+                        [{mcpMode ? 'MCP Client Mode' : `${currentGameMode.toUpperCase()} Mode`}]
+                    </Text>
+                    {mcpMode && showMcpClient && (
+                        <Box marginLeft={1}><Text color="cyan">Type /help for MCP commands</Text></Box>
+                    )}
+                    {hasAICapability && !mcpMode && (
+                        <Box marginLeft={1}><Text color="green">✓ AI enabled: {selectedModel?.label}</Text></Box>
+                    )}
+                </Box>
+                <Box>
+                     <Text color={isConnected ? "green" : "red"}>{isConnected ? "● Connected" : "◌ Disconnected"}</Text>
+                </Box>
 			</Box>
 			
-			{isLoading && (
-				<Box flexDirection="column" marginBottom={1} padding={1} borderStyle="round" borderColor="yellow">
-					<Box>
-						<Text color="green">
-							<Spinner type="dots" />
-						</Text>
-						<Text color="yellow"> {loadingMessage}</Text>
-					</Box>
-				</Box>
-			)}
-			
-			{!mcpMode && !isLoading && !showModelSelector && (
-				<Box flexDirection="column" marginBottom={1}>
+			{/* GAME GENERAL INFO (NAME AND BACKGROUND) */}
+			{!mcpMode && !isLoadingGame && !showModelSelector ? (
+				<Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="gray" paddingX={4}>
 					<Gradient name="vice">
-						<Text bold color="cyan">{currentRoomName}</Text>
+						<Text bold>{currentRoomName || 'No game active'}</Text>
 					</Gradient>
 					<Text color="gray" wrap="wrap">
 						{currentRoomBackground}</Text>
+				</Box>
+			) : (
+				<Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="cyan" paddingX={4}>
+					<Box>
+						<Text color="cyan">
+							<Spinner type="dots" />
+						</Text>
+						<Text color="cyan">
+							Preparing AI-generated Escape Room...
+						</Text>
+					</Box>
 				</Box>
 			)}
 
@@ -429,7 +521,10 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey, userId }) => {
 						<CommandHistory history={history} showHistory={showHistory} />
 					</ScrollableBox>
 
-					<Box marginTop={1}>
+					<Box flexDirection="column" marginTop={1}>
+						<Text color="gray">
+							Type /help for available commands or /newgame to start a new game.
+						</Text>
 						<CommandInput
 							value={currentCommand}
 							onChange={setCurrentCommand}
@@ -440,11 +535,29 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey, userId }) => {
 				</>
 			)}
 
+			{/* LOADING SPINNER IF COMMAND IS BEING PROCESSED */}
+			{isProcessingCommand && (
+				<Box flexDirection="column" marginBottom={1} padding={1} borderStyle="round" borderColor="yellow">
+					<Box>
+						<Text color="green">
+							<Spinner type="dots" />
+						</Text>
+						<Text color="yellow"> {loadingMessage}</Text>
+					</Box>
+				</Box>
+			)}
+
 			{!mcpMode && !isConnected && !showModelSelector && (
-				<Box marginTop={1}>
+				<Box marginTop={1} borderColor="red" borderStyle="round" paddingX={1}>
 					<Text color="red">
-						⚠ Backend server not connected - run backend with 'cd ../backend && npm
-						run start'
+						<Text bold>⚠ Backend server disconnected.</Text>
+						Please ensure it's running at http://localhost:3001.
+					</Text>
+					<Text color="gray">
+						Current game: {currentGameId ? `ID: ${currentGameId}` : 'No game active'} out of {totalRooms} rooms
+					</Text>
+					<Text color="gray">
+						Current room: {currentRoomName}
 					</Text>
 				</Box>
 			)}

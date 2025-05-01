@@ -65,15 +65,6 @@ export default function App({ name = '', email = '', register = false }: Props) 
 						</Text>
 						<Title />
 					</Box>
-
-					{/* Mode selection */}
-					{/* <Box marginY={1}>
-						<Text bold>Select Mode: </Text>
-						<Box marginLeft={1} width={20}>
-							<SelectInput items={items} onSelect={handleSelect} />
-						</Box>
-					</Box> */}
-
 					<Terminal 
 						// mode={'standard'} 		
 						apiKey={userData.apiKey} 

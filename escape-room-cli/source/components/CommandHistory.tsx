@@ -20,9 +20,7 @@ const CommandHistory: React.FC<CommandHistoryProps> = ({history, showHistory}) =
 		if (!showHistory) return null;
 		return (
 			<Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="cyan" padding={1}>
-				{/* <Gradient name="rainbow"> */}
-					<Text bold>Command History</Text>
-				{/* </Gradient> */}
+				<Text bold>Command History</Text>
 			</Box>
 		);
 	};
@@ -38,6 +36,7 @@ const CommandHistory: React.FC<CommandHistoryProps> = ({history, showHistory}) =
 						<Box
 							key={index}
 							marginY={1}
+							paddingX={1}
 						>
 							<Text color="yellow">❯ </Text>
 							<Text bold color="yellow">{item.text || ''}</Text>
@@ -47,9 +46,9 @@ const CommandHistory: React.FC<CommandHistoryProps> = ({history, showHistory}) =
 
 				// For response items, handle multi-line content with better formatting
 				return (
-					<Box key={index} flexDirection="column" marginY={1}>
+					<Box key={index} flexDirection="column" marginY={1} paddingX={1}>
 						{(item.text || '').split('\n').map((line, lineIndex) => (
-							<Text key={`${index}-${lineIndex}`} color="white">
+							<Text key={`${index}-${lineIndex}`} color="white" dimColor={true} wrap="wrap">
 								{line}
 							</Text>
 						))}
