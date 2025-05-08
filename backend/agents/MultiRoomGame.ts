@@ -11,9 +11,11 @@ export class MultiRoomGame {
   private readonly totalRooms: number = 3;
   private initPromise: Promise<void>;
   private isReady: boolean = false;
+  private apiKey: string; // Store the API key
 
-  constructor(gameId: string, totalRooms: number = 3) {
+  constructor(gameId: string, apiKey: string, totalRooms: number = 3) {
     this.gameId = gameId;
+    this.apiKey = apiKey; // Store the key
     this.totalRooms = totalRooms;
     
     this.initPromise = this.initializeRooms().then(() => {
@@ -36,9 +38,8 @@ export class MultiRoomGame {
       this.rooms[i] = new RoomAgent(roomId, i+1, this.totalRooms);
     }
     
-    // Allow first room to initialize
-    // Other rooms will initialize when needed
-    await this.rooms[0].process('/look');
+    // Trigger initial generation/load for the first room, passing the key
+    await this.rooms[0].process('/look', this.apiKey);
   }
 
   /**
@@ -54,8 +55,8 @@ export class MultiRoomGame {
   public async process(input: string): Promise<RoomCommandResponse> {
     await this.waitUntilReady();
     
-    // Process command in current room
-    const result = await this.getCurrentRoom().process(input);
+    // Process command in current room, passing the stored API key
+    const result = await this.getCurrentRoom().process(input, this.apiKey);
     
     // Check if room was unlocked and advance to next room if not the last
     if (result.data?.unlocked && !result.data?.gameCompleted && this.currentRoomIndex < this.totalRooms - 1) {
@@ -64,7 +65,8 @@ export class MultiRoomGame {
       
       // Get information about the next room
       const nextRoom = this.rooms[this.currentRoomIndex];
-      const nextRoomInfo = await nextRoom.process('/look');
+      // Trigger look in the next room to ensure its data is generated/loaded, passing the key
+      const nextRoomInfo = await nextRoom.process('/look', this.apiKey);
       
       // Enhance result with next room information
       result.data.nextRoom = {
@@ -73,7 +75,10 @@ export class MultiRoomGame {
       };
       
       // Update the text response for backward compatibility
-      result.response += `\n\nMoving to room ${this.currentRoomIndex + 1} of ${this.totalRooms}: ${result.data.nextRoom.name}.`;
+      result.response = (result.response || result.data.message || '') + // Preserve original response text if any
+                       `\n\nMoving to room ${this.currentRoomIndex + 1} of ${this.totalRooms}: ${result.data.nextRoom.name}.`;
+      // Also update the main message for consistency
+      result.data.message = result.response;
     }
     
     return result;
