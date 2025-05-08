@@ -8,7 +8,7 @@ import Gradient from 'ink-gradient';
 import ModelSelector from './ModelSelector.js';
 import McpClientUI from './McpClientUI.js';
 import { ModelOption, MODELS_COLLECTION } from '../utils/constants.js';
-
+import UserRegistration from './UserRegistration.js';
 interface TerminalProps {
 	// mode: 'standard' | 'mcp';
 	apiKey?: string;
@@ -32,7 +32,7 @@ interface GameInfo {
     objectCount?: number;
 }
 
-const Terminal: React.FC<TerminalProps> = ({ apiKey, userId }) => {
+const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: initialUserId }) => {
 	const [history, setHistory] = useState<Array<HistoryItem>>([]);
 	const [currentCommand, setCurrentCommand] = useState('');
 	const [isConnected, setIsConnected] = useState(false);
@@ -40,9 +40,13 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey, userId }) => {
 	const [isLoadingGame, setIsLoadingGame] = useState(false);
 	const [isProcessingCommand, setIsProcessingCommand] = useState(false);
 	const [loadingMessage, setLoadingMessage] = useState('');
-	const [hasAICapability, setHasAICapability] = useState<boolean>(!!apiKey);
+	const [hasAICapability, setHasAICapability] = useState<boolean>(!!initialApiKey);
 	const [showModelSelector, setShowModelSelector] = useState(false);
-	const [selectedModel, setSelectedModel] = useState<ModelOption>(Object.values(MODELS_COLLECTION)[0] as ModelOption); // Default to first model
+	const [selectedModel, setSelectedModel] = useState<ModelOption>(Object.values(MODELS_COLLECTION)[0] as ModelOption);
+
+	// Add state for userId and apiKey obtained during registration
+	const [userId, setUserId] = useState<string | undefined>(initialUserId);
+	const [apiKey, setApiKey] = useState<string | undefined>(initialApiKey);
 
 	// MCP RELATED STATE ------------------------------------------------------------
 	const [mcpMode, setMcpMode] = useState(false);
@@ -57,11 +61,10 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey, userId }) => {
     const [currentGameMode, setCurrentGameMode] = useState<'default' | 'single-custom' | 'multi-custom' | 'unknown'>('unknown');
     const [totalRooms, setTotalRooms] = useState<number>(1);
 
-	// Check if we have API capability for LLM interactions
+	// Check API capability (use state apiKey now)
 	useEffect(() => {
 		setHasAICapability(!!apiKey || !!process.env['ANTHROPIC_API_KEY'] || !!process.env['OPENAI_API_KEY']);
 	}, [apiKey]);
-	// --------------------------------------------------------------------------------------------
 
 	// Check backend connection
 	const checkBackendConnection = async () => {
@@ -117,13 +120,20 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey, userId }) => {
     const sendCommand = async (command: string): Promise<string> => {
         setIsProcessingCommand(true);
         setLoadingMessage('Processing...');
-        let responseText = 'Error processing command.'; // Default error message
+        let responseText = 'Error processing command.';
+
+        // Ensure we have a userId before sending command
+        if (!userId) {
+            setIsProcessingCommand(false);
+            return "Error: User ID not found. Please restart or re-register.";
+        }
 
         try {
             const response = await fetch('http://localhost:3001/api/command', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ command: command }),
+                // Include userId in the body
+                body: JSON.stringify({ command: command, userId: userId }),
             });
 
             if (!response.ok) {
@@ -170,8 +180,10 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey, userId }) => {
 
 	// Process natural language input through an LLM if API key is available
 	const processNaturalLanguage = async (text: string): Promise<string> => {
-		if (!hasAICapability) {
-		    return "No API key configured. Please set ANTHROPIC_API_KEY or OPENAI_API_KEY environment variable to enable AI assistance.";
+        // Use the apiKey from state
+        const currentApiKey = apiKey || process.env['ANTHROPIC_API_KEY'] || process.env['OPENAI_API_KEY'];
+		if (!currentApiKey) {
+		    return "No API key configured or found.";
 		}
 
 		setIsProcessingCommand(true);
@@ -182,13 +194,14 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey, userId }) => {
 			method: 'POST',
 			headers: { 
 			'Content-Type': 'application/json',
-			'Authorization': `Bearer ${apiKey || process.env['ANTHROPIC_API_KEY'] || process.env['OPENAI_API_KEY']}`
+            // Use the state apiKey for the bearer token
+			'Authorization': `Bearer ${currentApiKey}`
 			},
 			body: JSON.stringify({ 
 			message: text,
-			// currentRoom: currentRoom, // Backend gets room state itself
 			model: selectedModel.value,
-			userId: userId
+            // Include userId from state
+			userId: userId 
 			}),
 		});
 
@@ -256,13 +269,19 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey, userId }) => {
 			'AI assistance is enabled! Type natural language queries.',
 			`Current AI model: ${selectedModel.label}`
 		] : []),
-		`Current Room: ${currentRoomName} (${currentGameMode})`
+		`Current Room: "${currentRoomName}" (${currentGameMode})`
 		].join('\n');
 	};
 
 	// `/newgame [mode]`
 	const handleGenerateNewGame = async (mode: string = 'single-room'): Promise<string> => {
         const requestedMode = (mode === 'multi-room') ? 'multi-room' : 'single-room';
+
+        // Ensure we have userId before starting a new game
+        if (!userId) {
+            return "Error: User ID not found. Cannot create a new game. Please restart or re-register.";
+        }
+
 		try {
 			setIsLoadingGame(true);
 			setLoadingMessage(`Preparing an AI-generated ${requestedMode} Escape Game...`);
@@ -270,8 +289,8 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey, userId }) => {
 			const response = await fetch('http://localhost:3001/api/newgame', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-                // Send the requested mode
-                body: JSON.stringify({ mode: requestedMode })
+                // Send the requested mode AND userId
+                body: JSON.stringify({ mode: requestedMode, userId: userId })
 			});
 			
 			const data = await response.json();
@@ -448,7 +467,18 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey, userId }) => {
 	};
 	// ---------------------------------------------------------------------------------------------
 	
+	// Add handler for registration complete
+	const handleRegistrationComplete = (userData: { name: string; email?: string; apiKey?: string; userId?: string }) => {
+		setUserId(userData.userId);
+		setApiKey(userData.apiKey);
+		// After registration, fetch initial game state
+		checkBackendConnection(); 
+	};
+
 	//RENDER COMPONENT
+	if (!userId) {
+		return <UserRegistration onRegistrationComplete={handleRegistrationComplete} username={initialUserId}/>;
+	}
 	return (
 		<Box flexDirection="column" width="100%">
 			<Box marginBottom={1} justifyContent="space-between">

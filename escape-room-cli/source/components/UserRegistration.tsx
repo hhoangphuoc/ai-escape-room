@@ -36,154 +36,162 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
   const [apiKeyProvider, setApiKeyProvider] = useState<'anthropic' | 'openai'>('anthropic');
   const [apiKey, setApiKey] = useState<string>('');
   const [message, setMessage] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  // Load API keys from environment variables and authenticate with backend if user exists
   useEffect(() => {
     const anthropicKey = process.env['ANTHROPIC_API_KEY'];
     const openaiKey = process.env['OPENAI_API_KEY'];
+    let initialStep: 'name' | 'email' | 'apiKey' = 'name';
 
-    // Check if config file exists and load data
+    // Check if config file exists and load data to pre-fill
     try {
       if (fs.existsSync(USER_CONFIG_FILE)) {
+        console.log("UserRegistration: Config file found. Loading data..."); // LOG
         const configData = JSON.parse(fs.readFileSync(USER_CONFIG_FILE, 'utf8')) as UserConfig;
         
-        // If we already have registration data and at least one API key, complete registration
-        if (configData.name && (
-            (configData.apiKeys?.anthropic && configData.apiKeys.anthropic.length > 0) || 
-            (configData.apiKeys?.openai && configData.apiKeys.openai.length > 0)
-          )) {
-          setName(configData.name);
-          setUserEmail(configData.email || '');
-          
-          // Determine which API key to use
-          if (configData.apiKeys?.anthropic) {
-            setApiKeyProvider('anthropic');
-            setApiKey(configData.apiKeys.anthropic);
-          } else if (configData.apiKeys?.openai) {
-            setApiKeyProvider('openai');
-            setApiKey(configData.apiKeys.openai);
-          }
-          
-          // Try to authenticate with backend if we have userId
-          if (configData.userId) {
-            // Asynchronously authenticate, but don't block loading
-            fetch('http://localhost:3001/api/users/auth', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ userId: configData.userId })
-            })
-            .then(response => response.json())
-            .then(data => {
-              console.log('Authentication successful:', data);
-              // Continue silently
-            })
-            .catch(error => {
-              console.error('Error authenticating with backend:', error);
-              // Continue silently - authentication is not critical for app functionality
-            });
-          }
-          
-          // Skip to completion
-          setStep('complete');
-          onRegistrationComplete({ 
-            name: configData.name, 
-            email: configData.email,
-            apiKey: configData.apiKeys?.anthropic || configData.apiKeys?.openai,
-            userId: configData.userId
-          });
-          return;
+        // Pre-fill state from config if available
+        if (configData.name) setName(configData.name);
+        if (configData.email) setUserEmail(configData.email);
+        // Note: We don't automatically use API key from config here, user should confirm/
+        // But we can check if one exists to potentially skip asking later if env vars are also missing.
+
+        // Adjust starting step based on loaded config, but don't complete
+        if (configData.name && configData.email) {
+            // If name and email are present, maybe start at API key step?
+            // Let's keep it simple for now and always start at name, allowing review.
+            // initialStep = 'apiKey'; 
         } else if (configData.name) {
-          // If we have name but no API key, start at API key step
-          setName(configData.name);
-          setUserEmail(configData.email || '');
-          setStep('apiKey');
-          return;
+            initialStep = 'email';
         }
       }
-      
-      // If we have environment API keys, use them
-      if (anthropicKey) {
-        setApiKeyProvider('anthropic');
-        setApiKey(anthropicKey);
-      } else if (openaiKey) {
-        setApiKeyProvider('openai');
-        setApiKey(openaiKey);
-      }
-      
-      // If username was provided via CLI, start at email step
-      if (username) {
-        setStep('email');
-      }
     } catch (error) {
-      console.error('Error loading config:', error);
+      console.error('Error loading config during init:', error);
+      // Proceed without pre-filled data
     }
-  }, [username, email, onRegistrationComplete]);
+    
+    // Check environment API keys (store them if found, but don't auto-complete)
+    if (anthropicKey) {
+        setApiKeyProvider('anthropic');
+        setApiKey(anthropicKey); // Store env key in state
+        console.log("UserRegistration: Found Anthropic key in ENV."); // LOG
+    } else if (openaiKey) {
+        setApiKeyProvider('openai');
+        setApiKey(openaiKey); // Store env key in state
+        console.log("UserRegistration: Found OpenAI key in ENV."); // LOG
+    }
+    
+    // Set starting step based on CLI args or loaded config
+    if (username) {
+        // If username passed via CLI, override loaded name and start at email
+        setName(username);
+        initialStep = 'email';
+        if (email) {
+             setUserEmail(email);
+             initialStep = 'apiKey';
+        }
+    }
+    console.log(`UserRegistration: Setting initial step to: ${initialStep}`); // LOG
+    setStep(initialStep); // Set the determined starting step
 
+  }, []); // Run only once on mount
 
   const saveUserConfig = async () => {
+    // Prevent multiple submissions
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+
     setStep('loading');
-    setMessage('Saving your information...');
-    
-    try {
-      // Register with backend
-      let userId: string | undefined;
-      try {
-        const response = await fetch('http://localhost:3001/api/users/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name,
-            email: userEmail,
-            apiKey: apiKey,
-            provider: apiKeyProvider
-          })
-        });
-        
-        const data = await response.json();
-        if (data.userId) {
-          userId = data.userId;
-          setMessage('Connected to backend server!');
+    setMessage('Attempting registration and saving configuration...');
+    console.log("UserRegistration: saveUserConfig called.");
+
+    // Re-check env vars just before saving, in case they were set after app start
+    const currentAnthropicKey = process.env['ANTHROPIC_API_KEY'];
+    const currentOpenAIKey = process.env['OPENAI_API_KEY'];
+    let finalApiKey = apiKey; // Use state apiKey by default
+    let finalProvider = apiKeyProvider;
+
+    // Override with env vars if state apiKey is empty
+    if (!finalApiKey) {
+        if (currentAnthropicKey) {
+            finalApiKey = currentAnthropicKey;
+            finalProvider = 'anthropic';
+            console.log("UserRegistration: Using Anthropic key from ENV.");
+        } else if (currentOpenAIKey) {
+            finalApiKey = currentOpenAIKey;
+            finalProvider = 'openai';
+            console.log("UserRegistration: Using OpenAI key from ENV.");
         }
-      } catch (error) {
-        console.error('Error connecting to backend:', error);
-        setMessage('Could not connect to backend server. Saving locally only.');
-      }
-      
-      // Create config object
-      const config: UserConfig = {
+    }
+    
+    // Log the data being sent
+    const registrationData = {
         name,
-        registeredAt: new Date().toISOString(),
-        apiKeys: {},
-        userId
-      };
-      
-      if (userEmail) {
-        config.email = userEmail;
-      }
-      
-      if (apiKey) {
-        config.apiKeys = {
-          [apiKeyProvider]: apiKey
-        };
-      }
-      
-      // Write to config file
-      fs.writeFileSync(USER_CONFIG_FILE, JSON.stringify(config, null, 2));
-      
-      setMessage('Registration complete!');
-      setStep('complete');
-      
-      // Pass data to parent component
-      onRegistrationComplete({ 
-        name, 
         email: userEmail,
-        apiKey: apiKey,
-        userId
+        apiKey: finalApiKey, // Use potentially updated key
+        provider: finalProvider
+    };
+    console.log("UserRegistration: Preparing to register with backend. Data:", registrationData);
+
+    let userId: string | undefined;
+    try {
+      console.log("UserRegistration: Attempting fetch to /api/users/register...");
+      const response = await fetch('http://localhost:3001/api/users/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(registrationData)
       });
-    } catch (error) {
-      console.error('Error saving config:', error);
-      setMessage('Error saving configuration. Please try again.');
-      setStep('apiKey');
+      
+      console.log("UserRegistration: Fetch response status:", response.status);
+      const data = await response.json();
+      console.log("UserRegistration: Backend response data:", data);
+      
+      if (response.ok && data.userId) {
+        userId = data.userId;
+        setMessage('Registered with backend server!');
+      } else {
+          // Log backend error if registration failed but request went through
+          console.error("UserRegistration: Backend registration failed:", data.error || 'Unknown backend error');
+          setMessage(`Backend registration failed: ${data.error || 'Unknown error'}. Saving locally.`);
+      }
+
+    } catch (networkError) {
+      // Catch network errors specifically
+      console.error('UserRegistration: Network error connecting to backend:', networkError);
+      setMessage('Could not connect to backend server. Saving locally only.');
+    }
+    
+    // Save locally regardless of backend success
+    try {
+        console.log("UserRegistration: Saving config file locally...");
+        const config: UserConfig = {
+            name,
+            registeredAt: new Date().toISOString(),
+            apiKeys: {},
+            userId
+        };
+        if (userEmail) config.email = userEmail;
+        if (finalApiKey) config.apiKeys = { [finalProvider]: finalApiKey };
+        
+        fs.writeFileSync(USER_CONFIG_FILE, JSON.stringify(config, null, 2));
+        console.log("UserRegistration: Config file saved.");
+
+        setMessage('Configuration saved!');
+        setStep('complete');
+        
+        // Call completion callback *after* saving
+        console.log("UserRegistration: Calling onRegistrationComplete...");
+        onRegistrationComplete({ 
+            name, 
+            email: userEmail,
+            apiKey: finalApiKey, // Pass the key actually used
+            userId
+        });
+
+    } catch (saveError) {
+        console.error('UserRegistration: Error saving config file:', saveError);
+        setMessage('Error saving configuration file locally. Please check permissions.');
+        setStep('apiKey'); // Go back if local save failed
+        setIsSubmitting(false);
     }
   };
 
@@ -221,59 +229,45 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
   }
 
   if (step === 'apiKey') {
-    // Check if we have environment API keys
-    const anthropicKey = process.env['ANTHROPIC_API_KEY'];
-    const openaiKey = process.env['OPENAI_API_KEY'];
-    
-    if (anthropicKey || openaiKey) {
-      // If we have environment keys, show a message and complete registration
-      const provider = anthropicKey ? 'Anthropic' : 'OpenAI';
-      
+    // Check if we found an environment API key during useEffect
+    const hasEnvKey = !!(process.env['ANTHROPIC_API_KEY'] || process.env['OPENAI_API_KEY']);
+    const providerName = process.env['ANTHROPIC_API_KEY'] ? 'Anthropic' : (process.env['OPENAI_API_KEY'] ? 'OpenAI' : '');
+
+    if (hasEnvKey) {
+      // Key found in environment: Show confirmation message and trigger save on Enter
       return (
         <Box flexDirection="column" padding={1}>
-          <Text bold>API Key Found!</Text>
-          <Text>{provider} API Key detected in your environment.</Text>
+          <Text bold>API Key Found in Environment!</Text>
+          <Text>{providerName} API Key detected.</Text>
           <Box marginTop={1}>
             <Text color="green">✓ </Text>
-            <Text>You're all set! Click Enter to continue.</Text>
+            <Text>Press Enter to confirm and complete registration.</Text>
           </Box>
-          <Box marginTop={2}>
-            <TextInput
-              value=""
-              onChange={() => {}}
-              onSubmit={saveUserConfig}
-            />
+          {/* Hidden input to capture the final submit action */}
+          <Box height={0} width={0} overflow="hidden">
+              <TextInput value="" onChange={() => {}} onSubmit={saveUserConfig}/>
+          </Box>
+        </Box>
+      );
+    } else {
+      // No key found in environment: Instruct user to set it and allow proceeding
+      return (
+        <Box flexDirection="column" padding={1}>
+          <Text bold>Set up your AI API Key:</Text>
+          <Text>No API key found in environment variables (ANTHROPIC_API_KEY or OPENAI_API_KEY).</Text>
+          <Text>Please set one in your environment:</Text>
+          <Box marginTop={1} marginLeft={2}><Text>export OPENAI_API_KEY="your-key-here"</Text></Box>
+          <Text>or</Text>
+          <Box marginLeft={2}><Text>export ANTHROPIC_API_KEY="your-key-here"</Text></Box>
+          <Box marginTop={1}><Text>Then restart the application.</Text></Box>
+          <Box marginTop={2}><Text color="yellow">Alternatively, press Enter to continue without an API key (AI features will be limited).</Text></Box>
+          {/* Hidden input to capture the submit action */}
+          <Box height={0} width={0} overflow="hidden">
+             <TextInput value="" onChange={() => {}} onSubmit={saveUserConfig}/>
           </Box>
         </Box>
       );
     }
-    
-    return (
-      <Box flexDirection="column" padding={1}>
-        <Text bold>Set up your AI API Key:</Text>
-        <Text>
-          No API key found in environment variables. You'll need to add your key by:
-        </Text>
-        <Box marginTop={1} marginLeft={2}>
-          <Text>export ANTHROPIC_API_KEY="your-key-here"</Text>
-        </Box>
-        <Text>or</Text>
-        <Box marginLeft={2}>
-          <Text>export OPENAI_API_KEY="your-key-here"</Text>
-        </Box>
-        <Box marginTop={2}>
-          <Text>Then restart the application or continue without AI assistance.</Text>
-        </Box>
-        <Box marginTop={2}>
-          <TextInput
-            value=""
-            onChange={() => {}}
-            onSubmit={saveUserConfig}
-            placeholder="Press Enter to continue"
-          />
-        </Box>
-      </Box>
-    );
   }
 
   if (step === 'loading') {
@@ -289,14 +283,20 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
     );
   }
 
-  return (
-    <Box flexDirection="column" padding={1}>
-      <Box>
-        <Text color="green">✓ </Text>
-        <Text>Registration complete! Starting the Escape Room CLI...</Text>
-      </Box>
-    </Box>
-  );
+  // This step is reached either by auto-completion in useEffect OR after saveUserConfig
+  if (step === 'complete') {
+    return (
+        <Box flexDirection="column" padding={1}>
+          <Box>
+            <Text color="green">✓ </Text>
+            <Text color="green">{message || 'Registration complete! Starting... '}</Text>
+          </Box>
+        </Box>
+      );
+  }
+
+  // Default fallback or handle unexpected step value
+  return <Text>Loading registration...</Text>; 
 };
 
 export default UserRegistration; 
