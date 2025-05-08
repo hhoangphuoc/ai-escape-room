@@ -8,6 +8,7 @@ import { MultiRoomGame } from '../agents/MultiRoomGame'; // Import MultiRoomGame
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid'; // For generating game IDs
+import { VERCEL_DOMAIN, LOCAL_API_PORT, LOCAL_API_URL } from '../constant/apiConfig'; // Added import
 
 // Load environment variables
 dotenv.config();
@@ -105,7 +106,8 @@ Object.keys(ROOM_OBJECTS).forEach(key => {
 
 // --- Express App Setup ---
 const app: Application = express();
-const port = process.env.API_PORT || 3001; // Use environment variable or default
+// const port = process.env.API_PORT || 3001; // Use environment variable or default
+const port = LOCAL_API_PORT; // Use constant
 
 app.use(cors()); // Enable CORS for all origins (adjust for production)
 app.use(bodyParser.json()); // Parse JSON request bodies
@@ -772,5 +774,9 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
 
 // --- Start Server ---
 app.listen(port, () => {
-    console.log(`API server listening on http://localhost:${port}`);
+    const serverUrl = process.env.NODE_ENV === 'production' ? VERCEL_DOMAIN : LOCAL_API_URL;
+    console.log(`API server listening. Reachable at ${serverUrl}`);
+    if (process.env.NODE_ENV !== 'production') {
+        console.log(`Local: http://localhost:${port}`);
+    }
 });

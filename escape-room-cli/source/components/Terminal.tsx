@@ -9,6 +9,8 @@ import ModelSelector from './ModelSelector.js';
 import McpClientUI from './McpClientUI.js';
 import { ModelOption, MODELS_COLLECTION } from '../utils/constants.js';
 import UserRegistration from './UserRegistration.js';
+import { getApiUrl } from '../utils/apiConfig.js';
+
 interface TerminalProps {
 	// mode: 'standard' | 'mcp';
 	apiKey?: string;
@@ -71,8 +73,9 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: init
 		try {
 			const controller = new AbortController();
 			const timeoutId = setTimeout(() => controller.abort(), 1000);
+			const apiUrl = getApiUrl();
 
-			const response = await fetch('http://localhost:3001/api/health', {
+			const response = await fetch(`${apiUrl}/api/health`, {
 				method: 'GET',
 				headers: { 'Content-Type': 'application/json' },
 				signal: controller.signal,
@@ -85,7 +88,7 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: init
                 fetchGameState();
             } else {
                 setCurrentRoomName('Connection Error');
-                setCurrentRoomBackground('Could not connect to backend at http://localhost:3001.');
+                setCurrentRoomBackground(`Could not connect to backend at ${apiUrl}.`);
             }
 		} catch (error) {
 			setIsConnected(false);
@@ -98,7 +101,8 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: init
     // Fetch current game state from backend
     const fetchGameState = async () => {
         try {
-            const response = await fetch('http://localhost:3001/game/state');
+            const apiUrl = getApiUrl();
+            const response = await fetch(`${apiUrl}/game/state`);
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
@@ -121,6 +125,7 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: init
         setIsProcessingCommand(true);
         setLoadingMessage('Processing...');
         let responseText = 'Error processing command.';
+        const apiUrl = getApiUrl();
 
         // Ensure we have a userId before sending command
         if (!userId) {
@@ -129,7 +134,7 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: init
         }
 
         try {
-            const response = await fetch('http://localhost:3001/api/command', {
+            const response = await fetch(`${apiUrl}/api/command`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 // Include userId in the body
@@ -185,12 +190,13 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: init
 		if (!currentApiKey) {
 		    return "No API key configured or found.";
 		}
+        const apiUrl = getApiUrl();
 
 		setIsProcessingCommand(true);
 		setLoadingMessage(`Cooking with ${selectedModel.label}...`);
 
 		try {
-		const response = await fetch('http://localhost:3001/api/chat', {
+		const response = await fetch(`${apiUrl}/api/chat`, {
 			method: 'POST',
 			headers: { 
 			'Content-Type': 'application/json',
@@ -276,6 +282,7 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: init
 	// `/newgame [mode]`
 	const handleGenerateNewGame = async (mode: string = 'single-room'): Promise<string> => {
         const requestedMode = (mode === 'multi-room') ? 'multi-room' : 'single-room';
+        const apiUrl = getApiUrl();
 
         // Ensure we have userId before starting a new game
         if (!userId) {
@@ -286,7 +293,7 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: init
 			setIsLoadingGame(true);
 			setLoadingMessage(`Preparing an AI-generated ${requestedMode} Escape Game...`);
 			
-			const response = await fetch('http://localhost:3001/api/newgame', {
+			const response = await fetch(`${apiUrl}/api/newgame`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
                 // Send the requested mode AND userId
@@ -581,7 +588,7 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: init
 				<Box marginTop={1} borderColor="red" borderStyle="round" paddingX={1}>
 					<Text color="red">
 						<Text bold>⚠ Backend server disconnected.</Text>
-						Please ensure it's running at http://localhost:3001.
+						Please ensure it's running at ${getApiUrl()}.
 					</Text>
 					<Text color="gray">
 						Current game: {currentGameId ? `ID: ${currentGameId}` : 'No game active'} out of {totalRooms} rooms

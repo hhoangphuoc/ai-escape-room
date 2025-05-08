@@ -4,9 +4,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import axios from 'axios';
+import { getApiBaseUrl } from "../constant/apiConfig";
 
 // Define the base URL for the API server
-const API_BASE_URL = process.env.API_URL || "http://localhost:3001";
+const API_BASE_URL = getApiBaseUrl();
 const MCP_SERVER_VERSION = "0.1.0";
 
 // --- Interfaces for API Responses ---
