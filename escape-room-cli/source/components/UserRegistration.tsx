@@ -6,7 +6,6 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { getApiUrl } from '../utils/apiConfig.js';
-
 interface UserRegistrationProps {
   onRegistrationComplete: (userData: { name: string; email?: string; apiKey?: string; userId?: string }) => void;
   username?: string;
@@ -136,8 +135,8 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
     let userId: string | undefined;
     try {
       console.log("UserRegistration: Attempting fetch to /api/users/register...");
-      const apiUrl = getApiUrl();
-      const response = await fetch(`${apiUrl}/api/users/register`, {
+      const apiUrl = getApiUrl(); // Get base URL
+      const response = await fetch(`${apiUrl}/api/users/register`, { // Use template literal
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(registrationData)

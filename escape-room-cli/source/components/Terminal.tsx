@@ -7,10 +7,9 @@ import ScrollableBox from './ScrollableBox.js';
 import Gradient from 'ink-gradient';
 import ModelSelector from './ModelSelector.js';
 import McpClientUI from './McpClientUI.js';
-import { ModelOption, MODELS_COLLECTION } from '../utils/constants.js';
-import UserRegistration from './UserRegistration.js';
+import { MODELS_COLLECTION, type ModelOption } from '../utils/constants.js';
 import { getApiUrl } from '../utils/apiConfig.js';
-
+import UserRegistration from './UserRegistration.js';
 interface TerminalProps {
 	// mode: 'standard' | 'mcp';
 	apiKey?: string;
@@ -588,7 +587,7 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: init
 				<Box marginTop={1} borderColor="red" borderStyle="round" paddingX={1}>
 					<Text color="red">
 						<Text bold>⚠ Backend server disconnected.</Text>
-						Please ensure it's running at ${getApiUrl()}.
+						Please ensure it's running at https://ai-escape-room-backend.vercel.app or http://localhost:3001.
 					</Text>
 					<Text color="gray">
 						Current game: {currentGameId ? `ID: ${currentGameId}` : 'No game active'} out of {totalRooms} rooms

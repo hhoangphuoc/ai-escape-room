@@ -4,21 +4,22 @@ export const LOCAL_API_URL = `http://localhost:${LOCAL_API_PORT}`;
 
 /**
  * Returns the appropriate API base URL.
- * Prefers REACT_APP_API_URL, then API_URL environment variables.
- * If NODE_ENV is 'production' and no specific API_URL is set, defaults to VERCEL_DOMAIN.
- * Otherwise, defaults to LOCAL_API_URL.
+ * Prefers REACT_APP_API_URL or API_URL environment variables if set.
+ * Otherwise, defaults to VERCEL_DOMAIN.
+ * LOCAL_API_URL would only be used if explicitly configured via an env var or different logic.
  */
 export const getApiUrl = (): string => {
   if (process.env['REACT_APP_API_URL']) {
+    // For debugging, you can uncomment the next line:
+    console.log(`Using API URL from REACT_APP_API_URL: ${process.env['REACT_APP_API_URL']}`);
     return process.env['REACT_APP_API_URL'];
   }
   if (process.env['API_URL']) {
+    // For debugging, you can uncomment the next line:
+    console.log(`Using API URL from API_URL: ${process.env['API_URL']}`);
     return process.env['API_URL'];
   }
-  // Vercel automatically sets NODE_ENV to 'production' for production builds.
-  // For local development, NODE_ENV might be 'development' or undefined.
-  if (process.env['NODE_ENV'] === "production") {
-    return VERCEL_DOMAIN;
-  }
-  return LOCAL_API_URL;
+  
+  // Default to VERCEL_DOMAIN if no environment variable override is found.
+  return VERCEL_DOMAIN;
 };
