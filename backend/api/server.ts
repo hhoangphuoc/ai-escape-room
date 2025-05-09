@@ -150,14 +150,14 @@ apiRouter.post('/rooms/:id/command', async (req: Request, res: Response) => {
 });
 
 // GET /api/health - Health check endpoint for CLI connection
-app.get('/api/health', (req: Request, res: Response) => {
+apiRouter.get('/health', (req: Request, res: Response) => {
     // logger.info("Received health check request");
     console.log("API: Received health check request");
     res.status(200).json({ status: 'healthy', message: 'Backend server is running' });
 });
 
 // POST /api/command - Process commands from CLI
-app.post('/api/command', (async (req, res) => {
+apiRouter.post('/command', (async (req, res) => {
     // logger.info("Received /api/command request", { body: req.body });
     console.log("API: Received /api/command request", { body: req.body });
     const { command, userId } = req.body;
@@ -301,7 +301,7 @@ app.post('/api/command', (async (req, res) => {
 }) as any);
 
 // POST /api/newgame - Create a new escape room (single or multi)
-app.post('/api/newgame', (async (req: Request, res: Response) => {
+apiRouter.post('/newgame', (async (req: Request, res: Response) => {
     // logger.info("Received /api/newgame request", { body: req.body });
     console.log("API: Received /api/newgame request", { body: req.body });
     const { mode = 'single-room', userId } = req.body;
@@ -441,7 +441,7 @@ app.post('/api/newgame', (async (req: Request, res: Response) => {
 }) as any);
 
 // GET /game/state - Get current game state
-app.get('/game/state', (req: Request, res: Response) => {
+apiRouter.get('/game/state', (req: Request, res: Response) => {
     console.log("API: Received /game/state request");
     try {
         let roomName = 'Unknown Room';
@@ -468,7 +468,7 @@ app.get('/game/state', (req: Request, res: Response) => {
 });
 
 // GET /room/objects - List objects in the current room
-app.get('/room/objects', async (req: Request, res: Response) => { // Make async
+apiRouter.get('/room/objects', async (req: Request, res: Response) => { // Make async
     console.log("API: Received /room/objects request");
     try {
         let roomName = 'Unknown Room';
@@ -506,7 +506,7 @@ app.get('/room/objects', async (req: Request, res: Response) => { // Make async
 });
 
 // GET /object/:object_name - Get details of a specific object
-app.get('/object/:object_name', async (req, res) => { // Make async
+apiRouter.get('/object/:object_name', async (req, res) => { // Make async
     const objectNameParam = req.params.object_name;
     console.log(`API: Received /object/${objectNameParam} request`);
     try {
@@ -555,7 +555,7 @@ app.get('/object/:object_name', async (req, res) => { // Make async
 });
 
 // POST /room/unlock - Attempt to unlock the room
-app.post('/room/unlock', async (req, res) => { // Make async
+apiRouter.post('/room/unlock', async (req, res) => { // Make async
     const { password_guess } = req.body;
     console.log(`API: Received /room/unlock request`);
 
@@ -708,7 +708,7 @@ apiRouter.post('/users/get-api-key', ((req: Request, res: Response) => {
 }) as any);
 
 // --- Chat Endpoint ---
-app.post('/api/chat', (async (req: Request, res: Response) => {
+apiRouter.post('/chat', (async (req: Request, res: Response) => {
   const { message, model, userId: chatUserId } = req.body; // Destructure userId as chatUserId to avoid conflict if any
   const authHeader = req.headers.authorization;
   
@@ -798,10 +798,13 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
 });
 
 // --- Start Server ---
-app.listen(port, () => {
-    const serverUrl = process.env.NODE_ENV === 'production' ? VERCEL_DOMAIN : LOCAL_API_URL;
-    console.log(`API server listening. Reachable at ${serverUrl}`);
-    if (process.env.NODE_ENV !== 'production') {
-        console.log(`Local: http://localhost:${port}`);
-    }
-});
+// app.listen(port, () => {
+//     const serverUrl = process.env.NODE_ENV === 'production' ? VERCEL_DOMAIN : LOCAL_API_URL;
+//     console.log(`API server listening. Reachable at ${serverUrl}`);
+//     if (process.env.NODE_ENV !== 'production') {
+//         console.log(`Local: http://localhost:${port}`);
+//     }
+// });
+
+// Export the app for Vercel
+export default app;

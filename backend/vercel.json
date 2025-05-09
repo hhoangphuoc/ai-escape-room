@@ -8,7 +8,6 @@
         "includeFiles": [
           "dist/agents/**",
           "dist/constant/**",
-          "dist/api/**",
           "dist/mcp/**"
         ]
       }
