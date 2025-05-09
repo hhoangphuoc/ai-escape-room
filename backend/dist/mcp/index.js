@@ -8,8 +8,9 @@ const mcp_js_1 = require("@modelcontextprotocol/sdk/server/mcp.js");
 const stdio_js_1 = require("@modelcontextprotocol/sdk/server/stdio.js");
 const zod_1 = require("zod");
 const axios_1 = __importDefault(require("axios"));
+const apiConfig_1 = require("../constant/apiConfig");
 // Define the base URL for the API server
-const API_BASE_URL = process.env.API_URL || "http://localhost:3001";
+const API_BASE_URL = (0, apiConfig_1.getApiBaseUrl)();
 const MCP_SERVER_VERSION = "0.1.0";
 //---------------------------------------------------------------------------------------------------
 //  Helper Functions

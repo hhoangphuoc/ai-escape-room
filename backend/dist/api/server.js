@@ -13,6 +13,7 @@ const MultiRoomGame_1 = require("../agents/MultiRoomGame"); // Import MultiRoomG
 const openai_1 = __importDefault(require("openai"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const uuid_1 = require("uuid"); // For generating game IDs
+const apiConfig_1 = require("../constant/apiConfig"); // Added import
 // Load environment variables
 dotenv_1.default.config();
 // In-memory user store (replace with DB in production)
@@ -77,17 +78,23 @@ Object.keys(objects_1.ROOM_OBJECTS).forEach(key => {
 //--------------------------------
 // --- Express App Setup ---
 const app = (0, express_1.default)();
-const port = process.env.API_PORT || 3001; // Use environment variable or default
+// const port = process.env.API_PORT || 3001; // Use environment variable or default
+const port = apiConfig_1.LOCAL_API_PORT; // Use constant
 app.use((0, cors_1.default)()); // Enable CORS for all origins (adjust for production)
 app.use(body_parser_1.default.json()); // Parse JSON request bodies
-// --- API Endpoints ---
+// Create a new Express Router for API endpoints
+const apiRouter = express_1.default.Router();
+// --- API Endpoints (now on apiRouter) ---
+apiRouter.get('/', (req, res) => {
+    res.json({ message: 'API is running on server' });
+});
 // GET /rooms - list available rooms
-app.get('/api/rooms', (req, res) => {
+apiRouter.get('/rooms', (req, res) => {
     const rooms = Object.entries(objects_1.ROOM_OBJECTS).map(([id, room]) => ({ id: parseInt(id, 10), name: room.name }));
     res.json({ rooms });
 });
 // POST /rooms/:id/command - send a command to a room agent
-app.post('/api/rooms/:id/command', async (req, res) => {
+apiRouter.post('/rooms/:id/command', async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const agent = agents[id];
     if (!agent) {
@@ -109,13 +116,15 @@ app.post('/api/rooms/:id/command', async (req, res) => {
     }
 });
 // GET /api/health - Health check endpoint for CLI connection
-app.get('/api/health', (req, res) => {
+apiRouter.get('/health', (req, res) => {
+    // logger.info("Received health check request");
     console.log("API: Received health check request");
     res.status(200).json({ status: 'healthy', message: 'Backend server is running' });
 });
 // POST /api/command - Process commands from CLI
-app.post('/api/command', (async (req, res) => {
-    console.log("API: Received /api/command request");
+apiRouter.post('/command', (async (req, res) => {
+    // logger.info("Received /api/command request", { body: req.body });
+    console.log("API: Received /api/command request", { body: req.body });
     const { command, userId } = req.body;
     console.log(`API: Received command: '${command}' for user: ${userId}`);
     if (!command || !userId) {
@@ -246,7 +255,8 @@ app.post('/api/command', (async (req, res) => {
         }
     }
     catch (error) {
-        console.error("Error processing command in /api/command:", error);
+        // logger.error("Error processing command in /api/command", error, { command, userId });
+        console.error("API: Error processing command in /api/command", error, { command, userId });
         responseText = "Error: Failed to process command.";
         res.status(500).json({ response: responseText });
         return;
@@ -254,8 +264,9 @@ app.post('/api/command', (async (req, res) => {
     res.json({ response: responseText });
 }));
 // POST /api/newgame - Create a new escape room (single or multi)
-app.post('/api/newgame', (async (req, res) => {
-    console.log("API: Received /api/newgame request");
+apiRouter.post('/newgame', (async (req, res) => {
+    // logger.info("Received /api/newgame request", { body: req.body });
+    console.log("API: Received /api/newgame request", { body: req.body });
     const { mode = 'single-room', userId } = req.body;
     if (!userId) {
         return res.status(400).json({ success: false, error: "userId is required." });
@@ -332,14 +343,13 @@ app.post('/api/newgame', (async (req, res) => {
         }
         else {
             // ... invalid mode error handling ...
-            console.error(`API Error in /api/newgame: Invalid mode specified: ${mode} - Use 'single-room' or 'multi-room'.`);
+            // logger.error(`Invalid mode specified in /api/newgame: ${mode}`, undefined, { userId });
+            console.error("API: Invalid mode specified in /api/newgame: ${mode}", undefined, { userId });
             return res.status(400).json({ success: false, error: "Invalid game mode specified. Use 'single-room' or 'multi-room'." });
         }
         // ... Success response generation (keep existing) ...
         console.log(`API: New game created successfully. 
-                        \nMode: [${mode}], 
-                        \nName: [${gameName}], 
-                        \nID: [${gameId}]
+                        \nMode: [${mode}] - Name: [${gameName}] - ID: [${gameId}]
                     `);
         console.log(`Room Details: 
                         \n${JSON.stringify(roomData)}`);
@@ -359,7 +369,8 @@ app.post('/api/newgame', (async (req, res) => {
     }
     catch (error) {
         // ... Catch block (keep existing cleanup) ...
-        console.error(`API Error in /api/newgame (Mode: ${mode}, ID: ${gameId}):`, error);
+        // logger.error(`Error in /api/newgame`, error, { mode, gameId, userId });
+        console.error("API: Error in /api/newgame", error, { mode, gameId, userId });
         if (mode === 'single-room' && typeof gameId === 'number' && customSingleRoomAgents[gameId]) {
             delete customSingleRoomAgents[gameId];
         }
@@ -375,7 +386,7 @@ app.post('/api/newgame', (async (req, res) => {
     }
 }));
 // GET /game/state - Get current game state
-app.get('/game/state', (req, res) => {
+apiRouter.get('/game/state', (req, res) => {
     console.log("API: Received /game/state request");
     try {
         let roomName = 'Unknown Room';
@@ -403,7 +414,7 @@ app.get('/game/state', (req, res) => {
     }
 });
 // GET /room/objects - List objects in the current room
-app.get('/room/objects', async (req, res) => {
+apiRouter.get('/room/objects', async (req, res) => {
     console.log("API: Received /room/objects request");
     try {
         let roomName = 'Unknown Room';
@@ -443,7 +454,7 @@ app.get('/room/objects', async (req, res) => {
     }
 });
 // GET /object/:object_name - Get details of a specific object
-app.get('/object/:object_name', async (req, res) => {
+apiRouter.get('/object/:object_name', async (req, res) => {
     const objectNameParam = req.params.object_name;
     console.log(`API: Received /object/${objectNameParam} request`);
     try {
@@ -495,7 +506,7 @@ app.get('/object/:object_name', async (req, res) => {
     }
 });
 // POST /room/unlock - Attempt to unlock the room
-app.post('/room/unlock', async (req, res) => {
+apiRouter.post('/room/unlock', async (req, res) => {
     const { password_guess } = req.body;
     console.log(`API: Received /room/unlock request`);
     if (typeof password_guess !== 'string') {
@@ -581,9 +592,9 @@ app.post('/room/unlock', async (req, res) => {
         res.status(500).json({ error: "Failed to process unlock attempt." });
     }
 });
-// --- User Management Endpoints ---
+// --- User Management Endpoints (on apiRouter) ---
 // Register user endpoint
-app.post('/api/users/register', ((req, res) => {
+apiRouter.post('/users/register', ((req, res) => {
     const { name, email, apiKey, provider = 'openai' } = req.body;
     if (!name) {
         return res.status(400).json({ error: 'Name is required' });
@@ -603,7 +614,7 @@ app.post('/api/users/register', ((req, res) => {
     });
 }));
 // Authenticate user endpoint
-app.post('/api/users/auth', ((req, res) => {
+apiRouter.post('/users/auth', ((req, res) => {
     const { userId } = req.body;
     if (!userId || !users[userId]) {
         return res.status(401).json({ error: 'User not found' });
@@ -617,7 +628,7 @@ app.post('/api/users/auth', ((req, res) => {
     });
 }));
 // Get API key - secure endpoint that returns the API key for a given user and provider
-app.post('/api/users/get-api-key', ((req, res) => {
+apiRouter.post('/users/get-api-key', ((req, res) => {
     const { userId, provider = 'openai' } = req.body;
     if (!userId || !users[userId]) {
         return res.status(401).json({ error: 'User not found' });
@@ -634,8 +645,8 @@ app.post('/api/users/get-api-key', ((req, res) => {
     });
 }));
 // --- Chat Endpoint ---
-app.post('/api/chat', (async (req, res) => {
-    const { message, model } = req.body; // Removed currentRoom, rely on global gameState
+apiRouter.post('/chat', (async (req, res) => {
+    const { message, model, userId: chatUserId } = req.body; // Destructure userId as chatUserId to avoid conflict if any
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         return res.status(401).json({ error: 'API key is required' });
@@ -698,13 +709,28 @@ app.post('/api/chat', (async (req, res) => {
         });
     }
 }));
-// --- Error Handling Middleware (Basic) ---
+// Test route - this should also be on apiRouter if it's an /api route
+apiRouter.post('/users/test-post', (req, res) => {
+    // logger.info('Accessed /users/test-post successfully!', { body: req.body });
+    console.log("API: Accessed /users/test-post successfully!", { body: req.body });
+    res.status(200).json({ message: 'POST test to /users/test-post successful', receivedBody: req.body });
+});
+// Mount the API router under the /api path
+app.use('/api', apiRouter);
+// --- Error Handling Middleware (should be last, after all routes and routers) ---
 app.use((err, req, res, next) => {
-    console.error("Unhandled API Error:", err.stack);
+    // logger.error("Unhandled API Error", err); // err will include stack if it's an Error instance
+    console.error("API: Unhandled API Error", err); // err will include stack if it's an Error instance
     res.status(500).json({ error: 'An internal server error occurred.' });
 });
 // --- Start Server ---
-app.listen(port, () => {
-    console.log(`API server listening on http://localhost:${port}`);
-});
+// app.listen(port, () => {
+//     const serverUrl = process.env.NODE_ENV === 'production' ? VERCEL_DOMAIN : LOCAL_API_URL;
+//     console.log(`API server listening. Reachable at ${serverUrl}`);
+//     if (process.env.NODE_ENV !== 'production') {
+//         console.log(`Local: http://localhost:${port}`);
+//     }
+// });
+// Export the app for Vercel
+exports.default = app;
 //# sourceMappingURL=server.js.map
