@@ -1,11 +1,21 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ROOM_OBJECTS = void 0;
+// constant/objects.ts
+// export interface Room {
+//   name: string;
+//   sequence: number;
+//   background: string;
+//   objects: Record<string, GameObject>;
+//   password: string;
+// }
 exports.ROOM_OBJECTS = {
     1: {
         name: "The Foyer of Fading Secrets",
-        objects: {
-            manual: {
+        sequence: 1,
+        background: "You are in the foyer of a mansion. The walls are covered in old wallpaper, and the floor is covered in a thick layer of dust. The air is thick with the scent of old wood and mold.",
+        objects: [
+            {
                 name: "Manual",
                 description: "A faded manual titled 'Morse & Shadows' lies open.",
                 details: [
@@ -14,7 +24,7 @@ exports.ROOM_OBJECTS = {
                     "It references Chapter 3: 'Encoding Victory'."
                 ]
             },
-            chest: {
+            {
                 name: "Chest",
                 description: "A locked chest that gently creaks, sealed with a combination lock.",
                 details: [
@@ -23,7 +33,7 @@ exports.ROOM_OBJECTS = {
                     "The lock seems sturdy, probably needs a specific 3‑digit combination."
                 ]
             },
-            book: {
+            {
                 name: "Book",
                 description: "A leather‑bound notebook sits on a small table.",
                 details: [
@@ -32,13 +42,15 @@ exports.ROOM_OBJECTS = {
                     "The spine is slightly damaged."
                 ]
             }
-        },
+        ],
         password: "007"
     },
     2: {
         name: "The Study of Shadows",
-        objects: {
-            diary: {
+        sequence: 2,
+        background: "You are in a study of a mansion. The walls are covered in old wallpaper, and the floor is covered in a thick layer of dust. The air is thick with the scent of old wood and mold.",
+        objects: [
+            {
                 name: "Diary",
                 description: "An encrypted diary lies open on a mahogany desk.",
                 details: [
@@ -47,7 +59,7 @@ exports.ROOM_OBJECTS = {
                     "A date 'October 2nd' is circled multiple times."
                 ]
             },
-            safe: {
+            {
                 name: "Safe",
                 description: "A miniature safe is tucked away behind an oil painting.",
                 details: [
@@ -56,7 +68,7 @@ exports.ROOM_OBJECTS = {
                     "There are faint scratch marks near the dial."
                 ]
             },
-            portrait: {
+            {
                 name: "Portrait",
                 description: "An oil painting of a long‑forgotten operative hangs on the wall.",
                 details: [
@@ -65,13 +77,15 @@ exports.ROOM_OBJECTS = {
                     "A small plaque below reads 'Agent Alpha'."
                 ]
             }
-        },
+        ],
         password: "Alpha-2"
     },
     3: {
         name: "The Crypt of Coded Whispers",
-        objects: {
-            radio: {
+        sequence: 3,
+        background: "You are in a crypt of a mansion. The walls are covered in old wallpaper, and the floor is covered in a thick layer of dust. The air is thick with the scent of old wood and mold.",
+        objects: [
+            {
                 name: "Radio Transceiver",
                 description: "Continuously emits a faded, crackling signal.",
                 details: [
@@ -80,7 +94,7 @@ exports.ROOM_OBJECTS = {
                     "Seems tuned to a specific, obscure frequency mentioned in Project 'Cipher'."
                 ]
             },
-            blueprints: {
+            {
                 name: "Blueprints",
                 description: "Rolled‑up blueprints of secret facilities rest on a dusty table.",
                 details: [
@@ -89,7 +103,7 @@ exports.ROOM_OBJECTS = {
                     "There are three distinct layers to the blueprints."
                 ]
             },
-            documents: {
+            {
                 name: "Documents",
                 description: "Scattered confidential files with redacted portions.",
                 details: [
@@ -98,7 +112,7 @@ exports.ROOM_OBJECTS = {
                     "There are three distinct piles of documents."
                 ]
             }
-        },
+        ],
         password: "Cipher3"
     }
 };

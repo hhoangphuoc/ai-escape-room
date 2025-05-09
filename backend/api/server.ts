@@ -116,15 +116,23 @@ const port = LOCAL_API_PORT; // Use constant
 app.use(cors()); // Enable CORS for all origins (adjust for production)
 app.use(bodyParser.json()); // Parse JSON request bodies
 
-// --- API Endpoints ---
+// Create a new Express Router for API endpoints
+const apiRouter = express.Router();
+
+// --- API Endpoints (now on apiRouter) ---
+
+apiRouter.get('/', (req: Request, res: Response) => {
+  res.json({ message: 'API is running on server' });
+});
+
 // GET /rooms - list available rooms
-app.get('/api/rooms', (req: Request, res: Response) => {
+apiRouter.get('/rooms', (req: Request, res: Response) => {
   const rooms = Object.entries(ROOM_OBJECTS).map(([id, room]) => ({ id: parseInt(id, 10), name: room.name }));
   res.json({ rooms });
 });
 
 // POST /rooms/:id/command - send a command to a room agent
-app.post('/api/rooms/:id/command', async (req: Request, res: Response) => {
+apiRouter.post('/rooms/:id/command', async (req: Request, res: Response) => {
   const id = parseInt(req.params.id, 10);
   const agent = agents[id];
   if (!agent) {
@@ -145,15 +153,15 @@ app.post('/api/rooms/:id/command', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/health - Health check endpoint for CLI connection
-app.get('/api/health', (req: Request, res: Response) => {
+// GET /health - Health check endpoint for CLI connection
+apiRouter.get('/health', (req: Request, res: Response) => {
     logger.info("Received health check request");
     res.status(200).json({ status: 'healthy', message: 'Backend server is running' });
 });
 
-// POST /api/command - Process commands from CLI
-app.post('/api/command', (async (req, res) => {
-    logger.info("Received /api/command request", { body: req.body });
+// POST /command - Process commands from CLI
+apiRouter.post('/command', (async (req, res) => {
+    logger.info("Received /command request", { body: req.body });
     const { command, userId } = req.body;
     logger.info(`Received command: '${command}' for user: ${userId}`);
 
@@ -284,7 +292,7 @@ app.post('/api/command', (async (req, res) => {
         }
 
     } catch (error) {
-        logger.error("Error processing command in /api/command", error, { command, userId });
+        logger.error("Error processing command in /command", error, { command, userId });
         responseText = "Error: Failed to process command.";
         res.status(500).json({ response: responseText });
         return;
@@ -293,9 +301,9 @@ app.post('/api/command', (async (req, res) => {
     res.json({ response: responseText });
 }) as any);
 
-// POST /api/newgame - Create a new escape room (single or multi)
-app.post('/api/newgame', (async (req: Request, res: Response) => {
-    logger.info("Received /api/newgame request", { body: req.body });
+// POST /newgame - Create a new escape room (single or multi)
+apiRouter.post('/newgame', (async (req: Request, res: Response) => {
+    logger.info("Received /newgame request", { body: req.body });
     const { mode = 'single-room', userId } = req.body;
 
     if (!userId) {
@@ -388,7 +396,7 @@ app.post('/api/newgame', (async (req: Request, res: Response) => {
 
         } else {
             // ... invalid mode error handling ...
-            logger.error(`Invalid mode specified in /api/newgame: ${mode}`, undefined, { userId });
+            logger.error(`Invalid mode specified in /newgame: ${mode}`, undefined, { userId });
             return res.status(400).json({ success: false, error: "Invalid game mode specified. Use 'single-room' or 'multi-room'." });
         }
 
@@ -412,7 +420,7 @@ app.post('/api/newgame', (async (req: Request, res: Response) => {
 
     } catch (error) {
         // ... Catch block (keep existing cleanup) ...
-        logger.error(`Error in /api/newgame`, error, { mode, gameId, userId });
+        logger.error(`Error in /newgame`, error, { mode, gameId, userId });
         if (mode === 'single-room' && typeof gameId === 'number' && customSingleRoomAgents[gameId]) {
              delete customSingleRoomAgents[gameId];
         } else if (mode === 'multi-room' && typeof gameId === 'string' && activeMultiRoomGames[gameId]) {
@@ -624,10 +632,10 @@ app.post('/room/unlock', async (req, res) => { // Make async
     }
 });
 
-// --- User Management Endpoints ---
+// --- User Management Endpoints (on apiRouter) ---
 
 // Register user endpoint
-app.post('/api/users/register', ((req: Request, res: Response) => {
+apiRouter.post('/users/register', ((req: Request, res: Response) => {
   const { name, email, apiKey, provider = 'openai' } = req.body;
   
   if (!name) {
@@ -653,7 +661,7 @@ app.post('/api/users/register', ((req: Request, res: Response) => {
 }) as any);
 
 // Authenticate user endpoint
-app.post('/api/users/auth', ((req: Request, res: Response) => {
+apiRouter.post('/users/auth', ((req: Request, res: Response) => {
   const { userId } = req.body;
   
   if (!userId || !users[userId]) {
@@ -672,7 +680,7 @@ app.post('/api/users/auth', ((req: Request, res: Response) => {
 }) as any);
 
 // Get API key - secure endpoint that returns the API key for a given user and provider
-app.post('/api/users/get-api-key', ((req: Request, res: Response) => {
+apiRouter.post('/users/get-api-key', ((req: Request, res: Response) => {
   const { userId, provider = 'openai' } = req.body;
   
   if (!userId || !users[userId]) {
@@ -694,8 +702,8 @@ app.post('/api/users/get-api-key', ((req: Request, res: Response) => {
   });
 }) as any);
 
-// --- Chat Endpoint ---
-app.post('/api/chat', (async (req: Request, res: Response) => {
+// --- Chat Endpoint (on apiRouter) ---
+apiRouter.post('/chat', (async (req: Request, res: Response) => {
   const { message, model, userId: chatUserId } = req.body; // Destructure userId as chatUserId to avoid conflict if any
   const authHeader = req.headers.authorization;
   
@@ -767,9 +775,18 @@ app.post('/api/chat', (async (req: Request, res: Response) => {
   }
 }) as any);
 
-// --- Error Handling Middleware (Basic) ---
+// Test route - this should also be on apiRouter if it's an /api route
+apiRouter.post('/users/test-post', (req: Request, res: Response) => { 
+  logger.info('Accessed /users/test-post successfully!', { body: req.body });
+  res.status(200).json({ message: 'POST test to /users/test-post successful', receivedBody: req.body });
+});
+
+// Mount the API router under the /api path
+app.use('/api', apiRouter);
+
+// --- Error Handling Middleware (should be last, after all routes and routers) ---
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
-    logger.error("Unhandled API Error", err); // err will include stack if it's an Error instance
+    logger.error("Unhandled API Error", err); 
     res.status(500).json({ error: 'An internal server error occurred.' });
 });
 
@@ -783,10 +800,5 @@ app.listen(port, () => {
     }
 });
 */
-
-app.post('/api/users/test-post', (req: Request, res: Response) => {
-  logger.info('Accessed /api/users/test-post successfully!', { body: req.body });
-  res.status(200).json({ message: 'POST test to /api/users/test-post successful', receivedBody: req.body });
-});
 
 export default app;
