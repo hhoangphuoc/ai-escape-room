@@ -2,15 +2,8 @@
   "version": 2,
   "builds": [
     {
-      "src": "dist/api/server.js",
-      "use": "@vercel/node",
-      "config": {
-        "includeFiles": [
-          "dist/agents/**",
-          "dist/constant/**",
-          "dist/mcp/**"
-        ]
-      }
+      "src": "package.json",
+      "use": "@vercel/node"
     }
   ],
   "routes": [
