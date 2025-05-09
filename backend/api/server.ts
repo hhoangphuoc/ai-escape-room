@@ -3,7 +3,7 @@ import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import bodyParser from 'body-parser';
 import { ROOM_OBJECTS} from '../constant/objects'; // Adjust path as necessary
-import { RoomAgent, RoomData, RoomObject, type RoomCommandResponse } from '../agents/RoomAgent';
+import { RoomAgent, RoomData, type RoomCommandResponse } from '../agents/RoomAgent';
 import { MultiRoomGame } from '../agents/MultiRoomGame'; // Import MultiRoomGame
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
