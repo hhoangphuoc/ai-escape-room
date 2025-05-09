@@ -9,6 +9,10 @@ import OpenAI from 'openai';
 import dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid'; // For generating game IDs
 import { VERCEL_DOMAIN, LOCAL_API_PORT, LOCAL_API_URL } from '../constant/apiConfig'; // Added import
+import { Logger } from '../utils/logger'; // Import Logger
+
+// Initialize Logger with context
+const logger = new Logger('API-Server');
 
 // Load environment variables
 dotenv.config();
@@ -68,7 +72,7 @@ function getCurrentRoomData(): RoomData | null { // Return type might be null no
             // Use the agent's public getter
             return currentRoomAgent.getRoomData();
         } else {
-            console.warn(`Multi-room game with ID ${gameState.currentRoom} not found.`);
+            logger.warn(`Multi-room game with ID ${gameState.currentRoom} not found.`);
             return null;
         }
     } else if (gameState.gameMode === 'single-custom' && typeof gameState.currentRoom === 'number') {
@@ -77,19 +81,19 @@ function getCurrentRoomData(): RoomData | null { // Return type might be null no
             // Use the agent's public getter
             return agent.getRoomData();
         } else {
-            console.warn(`Custom single room agent with ID ${gameState.currentRoom} not found.`);
+            logger.warn(`Custom single room agent with ID ${gameState.currentRoom} not found.`);
             return null;
         }
     } else if (gameState.gameMode === 'default' && typeof gameState.currentRoom === 'number') {
         // Original logic for default rooms
         const validRoomId = gameState.currentRoom in ROOM_OBJECTS ? gameState.currentRoom : 1;
         if (!(gameState.currentRoom in ROOM_OBJECTS)) {
-            console.warn(`Invalid default room ID: ${gameState.currentRoom}. Defaulting to room 1.`);
+            logger.warn(`Invalid default room ID: ${gameState.currentRoom}. Defaulting to room 1.`);
             gameState.currentRoom = 1; // Reset to default if invalid
         }
         return ROOM_OBJECTS[validRoomId];
     } else {
-        console.error('Invalid game state:', gameState);
+        logger.error('Invalid game state', { state: gameState });
         return null;
     }
 }
@@ -136,22 +140,22 @@ app.post('/api/rooms/:id/command', async (req: Request, res: Response) => {
     const result: RoomCommandResponse = await agent.process(input);
     res.json(result);
   } catch (err: any) {
-    console.error('RoomAgent error:', err);
+    logger.error('RoomAgent error processing command', err);
     res.status(500).json({ response: 'Internal error processing command.' });
   }
 });
 
 // GET /api/health - Health check endpoint for CLI connection
 app.get('/api/health', (req: Request, res: Response) => {
-    console.log("API: Received health check request");
+    logger.info("Received health check request");
     res.status(200).json({ status: 'healthy', message: 'Backend server is running' });
 });
 
 // POST /api/command - Process commands from CLI
 app.post('/api/command', (async (req, res) => {
-    console.log("API: Received /api/command request");
+    logger.info("Received /api/command request", { body: req.body });
     const { command, userId } = req.body;
-    console.log(`API: Received command: '${command}' for user: ${userId}`);
+    logger.info(`Received command: '${command}' for user: ${userId}`);
 
     if (!command || !userId) {
         res.status(400).json({ response: 'Command and userId are required.' });
@@ -167,7 +171,7 @@ app.post('/api/command', (async (req, res) => {
     const apiKey = user.apiKeys?.openai || user.apiKeys?.anthropic;
     if (!apiKey && (gameState.gameMode === 'multi-custom' || gameState.gameMode === 'single-custom')) {
         // Only require API key if it might be needed for generation
-        console.warn(`User ${userId} does not have a configured API key for potential generation.`);
+        logger.warn(`User ${userId} does not have a configured API key for potential generation.`);
         return res.status(403).json(
             { response: 'No API key configured for this user. Cannot process commands needing AI generation.' });
     }
@@ -178,7 +182,7 @@ app.post('/api/command', (async (req, res) => {
         const game = activeMultiRoomGames[gameState.currentRoom];
         if (game) {
             try {
-                console.log(`API: Routing command to MultiRoomGame ID: ${gameState.currentRoom}`);
+                logger.info(`Routing command to MultiRoomGame ID: ${gameState.currentRoom}`);
                 // Pass the retrieved apiKey to game.process
                 // Note: MultiRoomGame.process now internally uses its stored key, so no need to pass here.
                 // const result: RoomCommandResponse = await game.process(command, apiKey);
@@ -186,13 +190,13 @@ app.post('/api/command', (async (req, res) => {
                 res.json({ response: result.data?.message || result.response || 'Action processed.' });
             } catch (error) {
                 // ... error handling ...
-                console.error(`Error processing command in MultiRoomGame ${gameState.currentRoom}:`, error);
+                logger.error(`Error processing command in MultiRoomGame ${gameState.currentRoom}`, error);
                 res.status(500).json({ response: "Error processing command in multi-room game." });
             }
             return;
         } else {
             // ... error handling ...
-            console.error(`Multi-room game ${gameState.currentRoom} not found, but gameState indicates multi-custom mode.`);
+            logger.error(`Multi-room game ${gameState.currentRoom} not found, but gameState indicates multi-custom mode.`);
             gameState = { currentRoom: 1, gameMode: 'default' };
             res.status(500).json({ response: "Error: Active multi-room game not found. Resetting game state." });
             return;
@@ -280,7 +284,7 @@ app.post('/api/command', (async (req, res) => {
         }
 
     } catch (error) {
-        console.error("Error processing command in /api/command:", error);
+        logger.error("Error processing command in /api/command", error, { command, userId });
         responseText = "Error: Failed to process command.";
         res.status(500).json({ response: responseText });
         return;
@@ -291,7 +295,7 @@ app.post('/api/command', (async (req, res) => {
 
 // POST /api/newgame - Create a new escape room (single or multi)
 app.post('/api/newgame', (async (req: Request, res: Response) => {
-    console.log("API: Received /api/newgame request");
+    logger.info("Received /api/newgame request", { body: req.body });
     const { mode = 'single-room', userId } = req.body;
 
     if (!userId) {
@@ -331,7 +335,7 @@ app.post('/api/newgame', (async (req: Request, res: Response) => {
         // --------------------------------------------------------------------------------------------
 
         if (mode === 'single-room') {
-            console.log("API: Creating single-room game...");
+            logger.info("Creating single-room game...", { userId, mode });
             const agentId = Date.now();
             gameId = agentId;
             
@@ -342,7 +346,7 @@ app.post('/api/newgame', (async (req: Request, res: Response) => {
 
             if (!roomData) {
                 // ... error handling ...
-                console.error("API Error in /api/newgame (single-room): Failed to get room data from new agent.");
+                logger.error("Failed to get room data from new agent for single-room game.", undefined, { agentId });
                 return res.status(500).json({ success: false, error: "Failed to create new game. Could not generate valid room data." });
             }
 
@@ -357,7 +361,7 @@ app.post('/api/newgame', (async (req: Request, res: Response) => {
         // --------------------------------------------------------------------------------------------
 
         } else if (mode === 'multi-room') {
-            console.log("API: Creating multi-room game...");
+            logger.info("Creating multi-room game...", { userId, mode });
             const newGameId = uuidv4();
             gameId = newGameId;
             // Pass apiKey to MultiRoomGame constructor
@@ -372,7 +376,7 @@ app.post('/api/newgame', (async (req: Request, res: Response) => {
 
             if (!roomData) {
                 // ... error handling ...
-                console.error("API Error in /api/newgame (multi-room): Failed to initialize first room data.");
+                logger.error("Failed to initialize first room data for multi-room game.", undefined, { gameId: newGameId });
                 delete activeMultiRoomGames[newGameId];
                 return res.status(500).json({ success: false, error: "Failed to create multi-room game. Could not initialize first room." });
             }
@@ -384,17 +388,14 @@ app.post('/api/newgame', (async (req: Request, res: Response) => {
 
         } else {
             // ... invalid mode error handling ...
-            console.error(`API Error in /api/newgame: Invalid mode specified: ${mode} - Use 'single-room' or 'multi-room'.`);
+            logger.error(`Invalid mode specified in /api/newgame: ${mode}`, undefined, { userId });
             return res.status(400).json({ success: false, error: "Invalid game mode specified. Use 'single-room' or 'multi-room'." });
         }
 
         // ... Success response generation (keep existing) ...
-        console.log(`API: New game created successfully. 
-                        \nMode: [${mode}] - Name: [${gameName}] - ID: [${gameId}]
-                    `);
+        logger.info(`New game created successfully. Mode: [${mode}] - Name: [${gameName}] - ID: [${gameId}]`);
 
-        console.log(`Room Details: 
-                        \n${JSON.stringify(roomData)}`);
+        logger.info("Initial room details for new game", { details: roomData });
         res.json({
             success: true,
             message: `New ${mode} game started. You're in room ${initialRoomSequence}: ${gameName}.`,
@@ -411,7 +412,7 @@ app.post('/api/newgame', (async (req: Request, res: Response) => {
 
     } catch (error) {
         // ... Catch block (keep existing cleanup) ...
-        console.error(`API Error in /api/newgame (Mode: ${mode}, ID: ${gameId}):`, error);
+        logger.error(`Error in /api/newgame`, error, { mode, gameId, userId });
         if (mode === 'single-room' && typeof gameId === 'number' && customSingleRoomAgents[gameId]) {
              delete customSingleRoomAgents[gameId];
         } else if (mode === 'multi-room' && typeof gameId === 'string' && activeMultiRoomGames[gameId]) {
@@ -428,7 +429,7 @@ app.post('/api/newgame', (async (req: Request, res: Response) => {
 
 // GET /game/state - Get current game state
 app.get('/game/state', (req: Request, res: Response) => {
-    console.log("API: Received /game/state request");
+    logger.info("Received /game/state request");
     try {
         let roomName = 'Unknown Room';
         let currentRoomDisplay: string | number = gameState.currentRoom;
@@ -448,14 +449,14 @@ app.get('/game/state', (req: Request, res: Response) => {
         }
         res.json({ currentRoom: currentRoomDisplay, roomName: roomName, gameMode: gameState.gameMode });
     } catch (error) {
-        console.error("API Error in /game/state:", error);
+        logger.error("Error in /game/state", error);
         res.status(500).json({ error: "Failed to get game state." });
     }
 });
 
 // GET /room/objects - List objects in the current room
 app.get('/room/objects', async (req: Request, res: Response) => { // Make async
-    console.log("API: Received /room/objects request");
+    logger.info("Received /room/objects request");
     try {
         let roomName = 'Unknown Room';
         let objectNames: string[] = [];
@@ -486,7 +487,7 @@ app.get('/room/objects', async (req: Request, res: Response) => { // Make async
         }
         res.json({ roomName: roomName, objects: objectNames });
      } catch (error) {
-        console.error("API Error in /room/objects:", error);
+        logger.error("Error in /room/objects", error);
         res.status(500).json({ error: "Failed to get room objects." });
     }
 });
@@ -494,7 +495,7 @@ app.get('/room/objects', async (req: Request, res: Response) => { // Make async
 // GET /object/:object_name - Get details of a specific object
 app.get('/object/:object_name', async (req, res) => { // Make async
     const objectNameParam = req.params.object_name;
-    console.log(`API: Received /object/${objectNameParam} request`);
+    logger.info(`Received /object/${objectNameParam} request`);
     try {
         let responseData: any = { error: "Object not found or invalid game state." };
         let statusCode = 404;
@@ -535,7 +536,7 @@ app.get('/object/:object_name', async (req, res) => { // Make async
         }
         res.status(statusCode).json(responseData);
      } catch (error) {
-        console.error(`API Error in /object/${objectNameParam}:`, error);
+        logger.error(`Error in /object/${objectNameParam}`, error);
         res.status(500).json({ error: `Failed to get object details.` });
     }
 });
@@ -543,7 +544,7 @@ app.get('/object/:object_name', async (req, res) => { // Make async
 // POST /room/unlock - Attempt to unlock the room
 app.post('/room/unlock', async (req, res) => { // Make async
     const { password_guess } = req.body;
-    console.log(`API: Received /room/unlock request`);
+    logger.info("Received /room/unlock request", { body: req.body });
 
     if (typeof password_guess !== 'string') {
         res.status(400).json({ error: 'Password guess must be a string.' });
@@ -618,7 +619,7 @@ app.post('/room/unlock', async (req, res) => { // Make async
         }
         res.status(statusCode).json(responseData);
      } catch (error) {
-        console.error("API Error in /room/unlock:", error);
+        logger.error("Error in /room/unlock", error);
         res.status(500).json({ error: "Failed to process unlock attempt." });
     }
 });
@@ -643,7 +644,7 @@ app.post('/api/users/register', ((req: Request, res: Response) => {
     registeredAt: new Date().toISOString()
   };
   
-  console.log(`API: User registered: ${name} (${userId})`);
+  logger.info(`User registered: ${name} (${userId})`, { email });
   
   res.json({ 
     userId,
@@ -662,7 +663,7 @@ app.post('/api/users/auth', ((req: Request, res: Response) => {
   // Return user data (excluding API keys)
   const { apiKeys, ...userData } = users[userId];
   
-  console.log(`API: User authenticated: ${userData.name} (${userId})`);
+  logger.info(`User authenticated: ${userData.name} (${userId})`);
   
   res.json({ 
     authenticated: true,
@@ -685,7 +686,7 @@ app.post('/api/users/get-api-key', ((req: Request, res: Response) => {
     return res.status(404).json({ error: `No API key found for provider: ${provider}` });
   }
   
-  console.log(`API: API key retrieved for user: ${user.name} (${userId}), provider: ${provider}`);
+  logger.info(`API key retrieved for user: ${user.name} (${userId})`, { provider });
   
   res.json({ 
     apiKey,
@@ -695,7 +696,7 @@ app.post('/api/users/get-api-key', ((req: Request, res: Response) => {
 
 // --- Chat Endpoint ---
 app.post('/api/chat', (async (req: Request, res: Response) => {
-  const { message, model } = req.body; // Removed currentRoom, rely on global gameState
+  const { message, model, userId: chatUserId } = req.body; // Destructure userId as chatUserId to avoid conflict if any
   const authHeader = req.headers.authorization;
   
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -718,7 +719,7 @@ app.post('/api/chat', (async (req: Request, res: Response) => {
         objectsContext = objArray.map(o => `${o.name}: ${o.description}`).join('\n');
     }
     
-    console.log(`API: Processing natural input with model: ${model}`);
+    logger.info(`Processing natural input with model: ${model}`, { userId: chatUserId, roomName: room.name });
     
     let responseText;
     const model_specs = {
@@ -758,7 +759,7 @@ app.post('/api/chat', (async (req: Request, res: Response) => {
     res.json({ response: responseText });
 
   } catch (error) {
-    console.error('Error processing chat:', error);
+    logger.error('Error processing chat', error, { model });
     res.status(500).json({ 
       error: 'Error processing chat request',
       details: error instanceof Error ? error.message : 'Unknown error'
@@ -768,15 +769,19 @@ app.post('/api/chat', (async (req: Request, res: Response) => {
 
 // --- Error Handling Middleware (Basic) ---
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
-    console.error("Unhandled API Error:", err.stack);
+    logger.error("Unhandled API Error", err); // err will include stack if it's an Error instance
     res.status(500).json({ error: 'An internal server error occurred.' });
 });
 
 // --- Start Server ---
+/*
 app.listen(port, () => {
     const serverUrl = process.env.NODE_ENV === 'production' ? VERCEL_DOMAIN : LOCAL_API_URL;
-    console.log(`API server listening. Reachable at ${serverUrl}`);
+    logger.info(`API server listening. Reachable at ${serverUrl}`);
     if (process.env.NODE_ENV !== 'production') {
-        console.log(`Local: http://localhost:${port}`);
+        logger.info(`Local: http://localhost:${port}`);
     }
 });
+*/
+
+export default app;

@@ -16,7 +16,8 @@
     "constant/**/*.ts",
     "api/**/*.ts",
     "mcp/**/*.ts",
-    "agents/**/*.ts"
+    "agents/**/*.ts",
+    "utils/**/*.ts"
   ],
   "exclude": ["node_modules", "dist"]
 }
