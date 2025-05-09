@@ -151,13 +151,15 @@ apiRouter.post('/rooms/:id/command', async (req: Request, res: Response) => {
 
 // GET /api/health - Health check endpoint for CLI connection
 app.get('/api/health', (req: Request, res: Response) => {
-    logger.info("Received health check request");
+    // logger.info("Received health check request");
+    console.log("API: Received health check request");
     res.status(200).json({ status: 'healthy', message: 'Backend server is running' });
 });
 
 // POST /api/command - Process commands from CLI
 app.post('/api/command', (async (req, res) => {
-    logger.info("Received /api/command request", { body: req.body });
+    // logger.info("Received /api/command request", { body: req.body });
+    console.log("API: Received /api/command request", { body: req.body });
     const { command, userId } = req.body;
     console.log(`API: Received command: '${command}' for user: ${userId}`);
 
@@ -288,7 +290,8 @@ app.post('/api/command', (async (req, res) => {
         }
 
     } catch (error) {
-        logger.error("Error processing command in /api/command", error, { command, userId });
+        // logger.error("Error processing command in /api/command", error, { command, userId });
+        console.error("API: Error processing command in /api/command", error, { command, userId });
         responseText = "Error: Failed to process command.";
         res.status(500).json({ response: responseText });
         return;
@@ -299,7 +302,8 @@ app.post('/api/command', (async (req, res) => {
 
 // POST /api/newgame - Create a new escape room (single or multi)
 app.post('/api/newgame', (async (req: Request, res: Response) => {
-    logger.info("Received /api/newgame request", { body: req.body });
+    // logger.info("Received /api/newgame request", { body: req.body });
+    console.log("API: Received /api/newgame request", { body: req.body });
     const { mode = 'single-room', userId } = req.body;
 
     if (!userId) {
@@ -392,7 +396,8 @@ app.post('/api/newgame', (async (req: Request, res: Response) => {
 
         } else {
             // ... invalid mode error handling ...
-            logger.error(`Invalid mode specified in /api/newgame: ${mode}`, undefined, { userId });
+            // logger.error(`Invalid mode specified in /api/newgame: ${mode}`, undefined, { userId });
+            console.error("API: Invalid mode specified in /api/newgame: ${mode}", undefined, { userId });
             return res.status(400).json({ success: false, error: "Invalid game mode specified. Use 'single-room' or 'multi-room'." });
         }
 
@@ -419,7 +424,8 @@ app.post('/api/newgame', (async (req: Request, res: Response) => {
 
     } catch (error) {
         // ... Catch block (keep existing cleanup) ...
-        logger.error(`Error in /api/newgame`, error, { mode, gameId, userId });
+        // logger.error(`Error in /api/newgame`, error, { mode, gameId, userId });
+        console.error("API: Error in /api/newgame", error, { mode, gameId, userId });
         if (mode === 'single-room' && typeof gameId === 'number' && customSingleRoomAgents[gameId]) {
              delete customSingleRoomAgents[gameId];
         } else if (mode === 'multi-room' && typeof gameId === 'string' && activeMultiRoomGames[gameId]) {
@@ -776,7 +782,8 @@ app.post('/api/chat', (async (req: Request, res: Response) => {
 
 // Test route - this should also be on apiRouter if it's an /api route
 apiRouter.post('/users/test-post', (req: Request, res: Response) => { 
-  logger.info('Accessed /users/test-post successfully!', { body: req.body });
+  // logger.info('Accessed /users/test-post successfully!', { body: req.body });
+  console.log("API: Accessed /users/test-post successfully!", { body: req.body });
   res.status(200).json({ message: 'POST test to /users/test-post successful', receivedBody: req.body });
 });
 
@@ -785,7 +792,8 @@ app.use('/api', apiRouter);
 
 // --- Error Handling Middleware (should be last, after all routes and routers) ---
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
-    logger.error("Unhandled API Error", err); // err will include stack if it's an Error instance
+    // logger.error("Unhandled API Error", err); // err will include stack if it's an Error instance
+    console.error("API: Unhandled API Error", err); // err will include stack if it's an Error instance
     res.status(500).json({ error: 'An internal server error occurred.' });
 });
 
