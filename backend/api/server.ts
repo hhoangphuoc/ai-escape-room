@@ -784,4 +784,9 @@ app.listen(port, () => {
 });
 */
 
+app.post('/api/users/test-post', (req: Request, res: Response) => {
+  logger.info('Accessed /api/users/test-post successfully!', { body: req.body });
+  res.status(200).json({ message: 'POST test to /api/users/test-post successful', receivedBody: req.body });
+});
+
 export default app;
