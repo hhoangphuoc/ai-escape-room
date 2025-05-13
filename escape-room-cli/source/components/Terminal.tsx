@@ -83,8 +83,16 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: init
 			clearTimeout(timeoutId);
 			setIsConnected(response.ok);
             if (response.ok) {
-                // Fetch initial game state if connected
-                fetchGameState();
+                // Fetch initial game state if connected AND userId is available
+                if (userId) {
+                    fetchGameState(userId);
+                } else {
+                    // If no userId yet (e.g. first run before registration), 
+                    // UserRegistration component will handle getting it.
+                    // We can set a default message or wait.
+                    setCurrentRoomName('Ready');
+                    setCurrentRoomBackground('Please register or type /help. User ID not yet available.');
+                }
             } else {
                 setCurrentRoomName('Connection Error');
                 setCurrentRoomBackground(`Could not connect to backend at ${apiUrl}.`);
@@ -98,19 +106,28 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: init
 	};
 
     // Fetch current game state from backend
-    const fetchGameState = async () => {
+    const fetchGameState = async (currentUserId: string) => {
+        if (!currentUserId) {
+            console.warn("fetchGameState called without a userId.");
+            setCurrentRoomName('Auth Error');
+            setCurrentRoomBackground('User ID is missing. Cannot fetch game state.');
+            return;
+        }
         try {
             const apiUrl = getApiUrl();
-            const response = await fetch(`${apiUrl}/game/state`);
+            // Corrected endpoint and added userId query parameter
+            const response = await fetch(`${apiUrl}/api/game/state?userId=${currentUserId}`);
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             const data = await response.json();
-            setCurrentRoomName(data.roomName || 'Unknown Room');
-            // We might not get background from /game/state, maybe call /look?
-            // Or adjust backend /game/state to return more info?
-            // For now, just update name and mode
+            setCurrentRoomName(data.currentRoomName || 'Unknown Room');
             setCurrentGameMode(data.gameMode || 'unknown');
+            setCurrentGameId(data.gameId || null);
+            setTotalRooms(data.totalRooms || 1);
+            // The /api/game/state now should provide comprehensive state. 
+            // If background is also sent, update it here.
+            // setCurrentRoomBackground(data.background || 'Welcome! Type /help.'); 
 
         } catch (error) {
             console.error("Error fetching game state:", error);
@@ -153,23 +170,38 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: init
                 const data = await response.json();
                 responseText = data.response || 'Action completed.';
 
-                // TODO: Check response data for state updates (e.g., room change)--------------------------------
-                // This depends on the backend /api/command returning structured data
-                // alongside the text response when needed.
-                // Example (adjust based on actual backend structure):
-                /*
-                if (data.data?.room) {
-                    setCurrentRoomName(data.data.room.name || 'Unknown Room');
-                    if(data.data.room.background) {
-                       setCurrentRoomBackground(data.data.room.background);
+                // IMPORTANT: Update local game state based on response from /api/command
+                // The backend's /api/command might return changes to room, game completion, etc.
+                // The `RoomCommandResponse` (data.data) from backend should be used here.
+                if (data.data) {
+                    const gameData = data.data;
+                    if (gameData.room) {
+                        setCurrentRoomName(gameData.room.name || 'Unknown Room');
+                        if(gameData.room.background) {
+                           setCurrentRoomBackground(gameData.room.background);
+                        }
+                        // Update other relevant state based on gameData.room if available
+                        // e.g., setCurrentGameId, setCurrentGameMode, setTotalRooms if they change
                     }
-                    // Update other state if needed
+                    if (gameData.nextRoom && gameData.unlocked) {
+                        // If moving to a new room
+                        setCurrentRoomName(gameData.nextRoom.name || 'Next Room');
+                        // Potentially update background if provided, or fetch new state
+                        // For now, a generic message or rely on next /look command
+                        setCurrentRoomBackground(`Moved to ${gameData.nextRoom.name}. Type /look.`);
+                    }
+                    if (gameData.gameCompleted) {
+                        responseText += "\n\nCongratulations! You've completed the game!";
+                        setCurrentRoomName('Game Completed!');
+                        setCurrentRoomBackground('You can start a new game with /newgame.');
+                        setCurrentGameId(null); // Reset current game ID
+                    }
+                    // Reflect any other changes from gameData to the CLI's state here
+                } else if (command.toLowerCase().startsWith('/look')) {
+                    // If it was a /look command and no structured data, perhaps re-fetch full state?
+                    // Or better, ensure /look from backend always returns structured room details.
+                    if (userId) fetchGameState(userId); // Re-fetch state after a look if needed
                 }
-                if (data.data?.gameCompleted) {
-                    // Handle game completion message
-                }
-                */
-                // --------------------------------------------------------------------------------------------
             }
         } catch (err) {
             console.error('Error sending command:', err);
@@ -477,8 +509,12 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: init
 	const handleRegistrationComplete = (userData: { name: string; email?: string; apiKey?: string; userId?: string }) => {
 		setUserId(userData.userId);
 		setApiKey(userData.apiKey);
-		// After registration, fetch initial game state
-		checkBackendConnection(); 
+		// After registration, fetch initial game state if userId is present
+		if (userData.userId) {
+            fetchGameState(userData.userId);
+        } else {
+            checkBackendConnection(); // Fallback to general connection check if somehow no userId
+        }
 	};
 
 	//RENDER COMPONENT

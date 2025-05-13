@@ -42,47 +42,91 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
     const anthropicKey = process.env['ANTHROPIC_API_KEY'];
     const openaiKey = process.env['OPENAI_API_KEY'];
     let initialStep: 'name' | 'email' | 'apiKey' = 'name';
+    let skipRegistration = false;
+    let loadedConfig: UserConfig | null = null;
 
-    // Check if config file exists and load data to pre-fill
+    // Check if config file exists and load data
     try {
       if (fs.existsSync(USER_CONFIG_FILE)) {
-        console.log("UserRegistration: Config file found. Loading data..."); // LOG
-        const configData = JSON.parse(fs.readFileSync(USER_CONFIG_FILE, 'utf8')) as UserConfig;
+        console.log("UserRegistration: Config file found. Loading data...");
+        const configRaw = fs.readFileSync(USER_CONFIG_FILE, 'utf8');
+        loadedConfig = JSON.parse(configRaw) as UserConfig;
         
-        // Pre-fill state from config if available
-        if (configData.name) setName(configData.name);
-        if (configData.email) setUserEmail(configData.email);
-        // Note: We don't automatically use API key from config here, user should confirm/
-        // But we can check if one exists to potentially skip asking later if env vars are also missing.
+        if (loadedConfig.userId && loadedConfig.name) {
+            // If userId and name exist, we might skip registration
+            // We should verify this userId with the backend
+            console.log(`UserRegistration: Found existing userId: ${loadedConfig.userId} and name: ${loadedConfig.name}`);
+            // For now, assume if userId exists, we can proceed. Verification step can be added later.
+            // Pre-fill state for onRegistrationComplete call
+            setName(loadedConfig.name);
+            if (loadedConfig.email) setUserEmail(loadedConfig.email);
+            
+            // Try to get API key from config or env
+            let existingApiKey = loadedConfig.apiKeys?.anthropic || loadedConfig.apiKeys?.openai;
+            let existingProvider = loadedConfig.apiKeys?.anthropic ? 'anthropic' : 'openai';
 
-        // Adjust starting step based on loaded config, but don't complete
-        if (configData.name && configData.email) {
-            // If name and email are present, maybe start at API key step?
-            // Let's keep it simple for now and always start at name, allowing review.
-            // initialStep = 'apiKey'; 
-        } else if (configData.name) {
-            initialStep = 'email';
+            if (!existingApiKey) { // If not in config, check ENV
+                if (anthropicKey) {
+                    existingApiKey = anthropicKey;
+                    existingProvider = 'anthropic';
+                } else if (openaiKey) {
+                    existingApiKey = openaiKey;
+                    existingProvider = 'openai';
+                }
+            }
+            if (existingApiKey) setApiKey(existingApiKey);
+            // Set flag to skip form steps
+            skipRegistration = true;
+        } else {
+            // Config exists but no userId or name, proceed with normal registration pre-filling
+            if (loadedConfig.name) setName(loadedConfig.name);
+            if (loadedConfig.email) setUserEmail(loadedConfig.email);
+            initialStep = loadedConfig.name ? (loadedConfig.email ? 'apiKey' : 'email') : 'name';
         }
       }
     } catch (error) {
       console.error('Error loading config during init:', error);
-      // Proceed without pre-filled data
+      // Proceed without pre-filled data, normal registration flow
+    }
+
+    if (skipRegistration && loadedConfig?.userId && loadedConfig?.name) {
+        console.log("UserRegistration: Skipping registration form, userId found in config.");
+        setMessage('Existing user found. Welcome back!');
+        setStep('complete'); // Go directly to complete
+        // Call onRegistrationComplete with loaded data
+        // Ensure apiKey state is set correctly before this call if we rely on it in onRegistrationComplete
+        const finalApiKeyFromConfig = apiKey || loadedConfig.apiKeys?.anthropic || loadedConfig.apiKeys?.openai || anthropicKey || openaiKey;
+        // const finalProviderFromConfig = (apiKey && apiKeyProvider) ? apiKeyProvider : (loadedConfig.apiKeys?.anthropic ? 'anthropic' : (loadedConfig.apiKeys?.openai ? 'openai' : (anthropicKey ? 'anthropic' : 'openai')));
+
+        onRegistrationComplete({
+            name: loadedConfig.name,
+            email: loadedConfig.email,
+            userId: loadedConfig.userId,
+            apiKey: finalApiKeyFromConfig
+            // provider is implicitly handled by apiKey state or chosen if multiple exist
+        });
+        return; // Exit useEffect early
     }
     
-    // Check environment API keys (store them if found, but don't auto-complete)
-    if (anthropicKey) {
+    //---------------------------------------------------------------------
+    // If not skipping, 
+    // set up API keys from ENV if present (for new registration flow)
+    //---------------------------------------------------------------------
+    if (anthropicKey && !apiKey) { // only if not already set by config load for skip path
         setApiKeyProvider('anthropic');
-        setApiKey(anthropicKey); // Store env key in state
-        console.log("UserRegistration: Found Anthropic key in ENV."); // LOG
-    } else if (openaiKey) {
+        setApiKey(anthropicKey);
+        console.log("UserRegistration (new reg): Found Anthropic key in ENV.");
+    } else if (openaiKey && !apiKey) { // only if not already set
         setApiKeyProvider('openai');
-        setApiKey(openaiKey); // Store env key in state
-        console.log("UserRegistration: Found OpenAI key in ENV."); // LOG
+        setApiKey(openaiKey);
+        console.log("UserRegistration (new reg): Found OpenAI key in ENV.");
     }
     
-    // Set starting step based on CLI args or loaded config
+    //---------------------------------------------------------------------
+    //                Adjust CLI args if provided
+    // overriding config-based initialStep for new registration
+    //---------------------------------------------------------------------
     if (username) {
-        // If username passed via CLI, override loaded name and start at email
         setName(username);
         initialStep = 'email';
         if (email) {
@@ -90,8 +134,8 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
              initialStep = 'apiKey';
         }
     }
-    console.log(`UserRegistration: Setting initial step to: ${initialStep}`); // LOG
-    setStep(initialStep); // Set the determined starting step
+    console.log(`UserRegistration: Setting initial step for new/partial registration to: ${initialStep}`);
+    setStep(initialStep);
 
   }, []); // Run only once on mount
 
@@ -235,7 +279,10 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
     const providerName = process.env['ANTHROPIC_API_KEY'] ? 'Anthropic' : (process.env['OPENAI_API_KEY'] ? 'OpenAI' : '');
 
     if (hasEnvKey) {
-      // Key found in environment: Show confirmation message and trigger save on Enter
+      //---------------------------------------------------------------------
+      // FOUND KEY IN ENV: 
+      // Show confirmation message and trigger save on Enter
+      //---------------------------------------------------------------------
       return (
         <Box flexDirection="column" padding={1}>
           <Text bold>API Key Found in Environment!</Text>
@@ -251,7 +298,10 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
         </Box>
       );
     } else {
-      // No key found in environment: Instruct user to set it and allow proceeding
+      //---------------------------------------------------------------------
+      // NO KEY FOUND IN ENV: 
+      // Instruct user to set it and allow proceeding
+      //---------------------------------------------------------------------
       return (
         <Box flexDirection="column" padding={1}>
           <Text bold>Set up your AI API Key:</Text>
