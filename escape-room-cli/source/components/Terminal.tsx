@@ -90,8 +90,8 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                 if (sessionToken && userId) { // Only fetch game state if logged in
                     fetchGameState();
                 } else {
-                    setCurrentRoomName('Ready');
-                    setCurrentRoomBackground('Please register or login. Type /help.');
+                    setCurrentRoomName('Logged In. Game Not Created');
+                    setCurrentRoomBackground('Please create a new game with /newgame. Type /help for more info.');
                 }
             } else {
                 setCurrentRoomName('Connection Error');
@@ -108,8 +108,8 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
     const fetchGameState = async () => {
         if (!sessionToken) {
             console.warn("fetchGameState called without a sessionToken.");
-            setCurrentRoomName('Escape Room Not Found');
-            setCurrentRoomBackground('No active session. Create one with /newgame');
+            setCurrentRoomName('Not Logged In');
+            setCurrentRoomBackground('Please /login or /register. Type /help for more info.');
             return;
         }
         try {
@@ -216,7 +216,7 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 
         const apiUrl = getApiUrl();
 		setIsProcessingCommand(true);
-		setLoadingMessage(`Thinking with ${selectedModel.label}...`);
+		setLoadingMessage(`Cooking with ${selectedModel.label}...`);
 		try {
 		    const response = await fetch(`${apiUrl}/api/chat`, {
 			method: 'POST',
@@ -270,11 +270,11 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 		'Available commands:',
 		'/help - Show this help message',
         ...(sessionToken ? [
-            '/look (or /seek) - Look around the room',
-            '/inspect [object] (or /analyse) - Inspect an object',
-            '/guess [password] (or /password) - Try a password',
+			'/newgame [single-room|multi-room] - Start a new AI-generated game',
+            '/look - Look around the room',
+            '/inspect [object] - Inspect an object',
+            '/guess [password] - Try a password',
             '/hint - Get a hint',
-            '/newgame [single-room|multi-room] - Start a new AI-generated game',
             '/status - Show current game status',
             '/logout - End your current session',
         ] : [
@@ -305,7 +305,7 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
         }
 		try {
 			setIsLoadingGame(true);
-			setLoadingMessage(`Preparing an AI-generated ${requestedMode} Escape Game...`);
+			setLoadingMessage(`Preparing an AI-generated [${requestedMode}] Escape Game...`);
 			const response = await fetch(`${apiUrl}/api/newgame`, {
 				method: 'POST',
 				headers: { 
@@ -505,7 +505,7 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 					<Text color="gray" wrap="wrap">{currentRoomBackground}</Text>
 				</Box>
 			) : isLoadingGame ? (
-				<Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="yellow" paddingX={1}>
+				<Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="cyan" paddingX={1}>
 					<Box><Text color="cyan"><Spinner type="dots" /> {loadingMessage}</Text></Box>
 				</Box>
 			) : null}

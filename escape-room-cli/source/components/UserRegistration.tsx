@@ -6,7 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { getApiUrl } from '../utils/apiConfig.js';
-import SelectInput from 'ink-select-input';
+// import SelectInput from 'ink-select-input';
 
 interface UserRegistrationProps {
   onRegistrationComplete: (userData: { 
@@ -249,29 +249,34 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
   if (step === 'apiKey') {
     return (
       <Box flexDirection="column" padding={1}>
-        <Text bold color="cyan">Set your AI API Key (OpenAI or Anthropic):</Text>
-        <Text>This will be stored in {USER_CONFIG_FILE}</Text>
+        <Text bold color="cyan">Your AI API Key (OpenAI or Anthropic):</Text>
+        <Text color="gray">This will be stored in {USER_CONFIG_FILE}</Text>
         <Box marginTop={1} flexDirection="row" alignItems="center">
-            <Text>AI Provider: </Text>
-            <Text bold color="cyan"> Currently set to: [{currentApiKeyProvider.toUpperCase()}] </Text>
-            <SelectInput items={[{ label: 'OpenAI', value: 'openai' }, { label: 'Anthropic', value: 'anthropic' }]} onSelect={
+            <Text color="cyan">Current AI Provider: </Text>
+            <Text> [{currentApiKeyProvider.toUpperCase()}] </Text>
+            {/* <SelectInput items={[{ label: 'OpenAI', value: 'openai' }, { label: 'Anthropic', value: 'anthropic' }]} onSelect={
               (item) => {
                 setCurrentApiKeyProvider(item.value as 'openai' | 'anthropic');
               }
-            }/>
+            }/> */}
         </Box>
         <Box>
-          <Text>API Key:   </Text>
+          <Text color="cyan">API Key: </Text>
           <TextInput
             value={currentCliApiKey}
             onChange={setCurrentCliApiKey}
             onSubmit={saveUserConfig}
             placeholder="sk-... or anthropic-key-..."
             mask="*"
+            
           />
         </Box>
-        <Text color="cyan">Press Enter to register and save.</Text>
-        {currentCliApiKey && <Text color="yellow">Your key will be registered & stored locally.</Text>}
+        <Box marginTop={1}>
+          {currentCliApiKey && <Text color="gray">Your key will be registered & stored locally.</Text>}
+        </Box>
+        <Box marginTop={1}>
+          <Text color="cyan">Press Enter to register and save.</Text>
+        </Box>
       </Box>
     );
   }
