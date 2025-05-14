@@ -10,10 +10,17 @@ import McpClientUI from './McpClientUI.js';
 import { MODELS_COLLECTION, type ModelOption } from '../utils/constants.js';
 import { getApiUrl } from '../utils/apiConfig.js';
 import UserRegistration from './UserRegistration.js';
+import fs from 'fs'; // For logout config clear
+import path from 'path'; // For logout config clear
+import os from 'os'; // For logout config clear
+
+const USER_CONFIG_FILE = path.join(os.homedir(), '.escape-room-config.json'); // For logout
+
 interface TerminalProps {
 	// mode: 'standard' | 'mcp';
-	apiKey?: string;
-	userId?: string;
+	// These initial props might be less relevant if UserRegistration handles initial load
+	// apiKey?: string; 
+	// userId?: string;
 }
 
 // Define type for history items
@@ -33,7 +40,7 @@ interface GameInfo {
     objectCount?: number;
 }
 
-const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: initialUserId }) => {
+const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: initialUserId }*/) => {
 	const [history, setHistory] = useState<Array<HistoryItem>>([]);
 	const [currentCommand, setCurrentCommand] = useState('');
 	const [isConnected, setIsConnected] = useState(false);
@@ -41,57 +48,50 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: init
 	const [isLoadingGame, setIsLoadingGame] = useState(false);
 	const [isProcessingCommand, setIsProcessingCommand] = useState(false);
 	const [loadingMessage, setLoadingMessage] = useState('');
-	const [hasAICapability, setHasAICapability] = useState<boolean>(!!initialApiKey);
+	// const [hasAICapability, setHasAICapability] = useState<boolean>(!!initialApiKey)
+	const [hasAICapability, setHasAICapability] = useState<boolean>(false); // Determined by presence of API key in state
 	const [showModelSelector, setShowModelSelector] = useState(false);
 	const [selectedModel, setSelectedModel] = useState<ModelOption>(Object.values(MODELS_COLLECTION)[0] as ModelOption);
 
-	// Add state for userId and apiKey obtained during registration
-	const [userId, setUserId] = useState<string | undefined>(initialUserId);
-	const [apiKey, setApiKey] = useState<string | undefined>(initialApiKey);
+	// User and Auth State
+	const [userId, setUserId] = useState<string | undefined>(undefined);
+	const [sessionToken, setSessionToken] = useState<string | undefined>(undefined);
+    const [userName, setUserName] = useState<string | undefined>(undefined);
+    const [cliApiKey, setCliApiKey] = useState<string | undefined>(undefined); // API key for current session, if provided
 
-	// MCP RELATED STATE ------------------------------------------------------------
+	// MCP RELATED STATE
 	const [mcpMode, setMcpMode] = useState(false);
 	const [showMcpClient, setShowMcpClient] = useState(false);
-	// -----------------------------------------------------------------------------
 
-	// Game State - Managed primarily by backend, reflected here
-	// const [currentRoom, setCurrentRoom] = useState(1); // Less relevant now
+	// Game State
     const [currentGameId, setCurrentGameId] = useState<string | number | null>(null);
 	const [currentRoomName, setCurrentRoomName] = useState('Loading...');
 	const [currentRoomBackground, setCurrentRoomBackground] = useState('Please wait or type /help.');
     const [currentGameMode, setCurrentGameMode] = useState<'default' | 'single-custom' | 'multi-custom' | 'unknown'>('unknown');
     const [totalRooms, setTotalRooms] = useState<number>(1);
 
-	// Check API capability (use state apiKey now)
 	useEffect(() => {
-		setHasAICapability(!!apiKey || !!process.env['ANTHROPIC_API_KEY'] || !!process.env['OPENAI_API_KEY']);
-	}, [apiKey]);
+		setHasAICapability(!!cliApiKey || !!process.env['OPENAI_API_KEY'] || !!process.env['ANTHROPIC_API_KEY']); // AI capability now depends on the session's API key state
+	}, [cliApiKey]);
 
-	// Check backend connection
 	const checkBackendConnection = async () => {
 		try {
 			const controller = new AbortController();
 			const timeoutId = setTimeout(() => controller.abort(), 1000);
 			const apiUrl = getApiUrl();
-
 			const response = await fetch(`${apiUrl}/api/health`, {
 				method: 'GET',
 				headers: { 'Content-Type': 'application/json' },
 				signal: controller.signal,
 			});
-
 			clearTimeout(timeoutId);
 			setIsConnected(response.ok);
             if (response.ok) {
-                // Fetch initial game state if connected AND userId is available
-                if (userId) {
-                    fetchGameState(userId);
+                if (sessionToken && userId) { // Only fetch game state if logged in
+                    fetchGameState();
                 } else {
-                    // If no userId yet (e.g. first run before registration), 
-                    // UserRegistration component will handle getting it.
-                    // We can set a default message or wait.
                     setCurrentRoomName('Ready');
-                    setCurrentRoomBackground('Please register or type /help. User ID not yet available.');
+                    setCurrentRoomBackground('Please register or login. Type /help.');
                 }
             } else {
                 setCurrentRoomName('Connection Error');
@@ -100,35 +100,33 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: init
 		} catch (error) {
 			setIsConnected(false);
             setCurrentRoomName('Connection Error');
-            setCurrentRoomBackground('Could not connect to backend. Is it running? Try: cd ../backend && npm run start');
+            setCurrentRoomBackground('Could not connect to backend. Is it running?');
 			console.error('Backend connection error:', error);
 		}
 	};
 
-    // Fetch current game state from backend
-    const fetchGameState = async (currentUserId: string) => {
-        if (!currentUserId) {
-            console.warn("fetchGameState called without a userId.");
-            setCurrentRoomName('Auth Error');
-            setCurrentRoomBackground('User ID is missing. Cannot fetch game state.');
+    const fetchGameState = async () => {
+        if (!sessionToken) {
+            console.warn("fetchGameState called without a sessionToken.");
+            setCurrentRoomName('Escape Room Not Found');
+            setCurrentRoomBackground('No active session. Create one with /newgame');
             return;
         }
         try {
             const apiUrl = getApiUrl();
-            // Corrected endpoint and added userId query parameter
-            const response = await fetch(`${apiUrl}/api/game/state?userId=${currentUserId}`);
+            const response = await fetch(`${apiUrl}/api/game/state`, { // No userId in query, uses token
+                headers: { 'Authorization': `Bearer ${sessionToken}` }
+            });
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                 const errorData = await response.json();
+                 throw new Error(`HTTP error! status: ${response.status}, message: ${errorData.error || 'Failed to fetch state'}`);
             }
             const data = await response.json();
             setCurrentRoomName(data.currentRoomName || 'Unknown Room');
             setCurrentGameMode(data.gameMode || 'unknown');
             setCurrentGameId(data.gameId || null);
             setTotalRooms(data.totalRooms || 1);
-            // The /api/game/state now should provide comprehensive state. 
-            // If background is also sent, update it here.
             // setCurrentRoomBackground(data.background || 'Welcome! Type /help.'); 
-
         } catch (error) {
             console.error("Error fetching game state:", error);
             setCurrentRoomName('State Error');
@@ -136,77 +134,64 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: init
         }
     };
 
-	// Send generic command to the backend's /api/command endpoint
     const sendCommand = async (command: string): Promise<string> => {
         setIsProcessingCommand(true);
         setLoadingMessage('Processing...');
         let responseText = 'Error processing command.';
         const apiUrl = getApiUrl();
 
-        // Ensure we have a userId before sending command
-        if (!userId) {
+        if (!sessionToken) {
             setIsProcessingCommand(false);
-            return "Error: User ID not found. Please restart or re-register.";
+            return "Error: Not authenticated. Please login or register.";
         }
 
         try {
             const response = await fetch(`${apiUrl}/api/command`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                // Include userId in the body
-                body: JSON.stringify({ command: command, userId: userId }),
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${sessionToken}`
+                },
+                body: JSON.stringify({ command: command }), // No userId in body
             });
-
+            // ... (rest of error handling and response parsing remains similar) ...
             if (!response.ok) {
-                // Try to get error details from response body
                 try {
                     const errorData = await response.json();
-                    responseText = `Error: ${errorData.response || response.statusText}`;
-                } catch { // Handle cases where body is not JSON or empty
+                    responseText = `Error: ${errorData.response || errorData.error || response.statusText}`;
+                } catch { 
                     responseText = `Error: Received status ${response.status}`;
                 }
                 console.error('Command API error:', responseText);
             } else {
                 const data = await response.json();
                 responseText = data.response || 'Action completed.';
-
-                // IMPORTANT: Update local game state based on response from /api/command
-                // The backend's /api/command might return changes to room, game completion, etc.
-                // The `RoomCommandResponse` (data.data) from backend should be used here.
                 if (data.data) {
                     const gameData = data.data;
                     if (gameData.room) {
                         setCurrentRoomName(gameData.room.name || 'Unknown Room');
-                        if(gameData.room.background) {
-                           setCurrentRoomBackground(gameData.room.background);
-                        }
-                        // Update other relevant state based on gameData.room if available
-                        // e.g., setCurrentGameId, setCurrentGameMode, setTotalRooms if they change
+                        if(gameData.room.background) setCurrentRoomBackground(gameData.room.background);
                     }
                     if (gameData.nextRoom && gameData.unlocked) {
-                        // If moving to a new room
                         setCurrentRoomName(gameData.nextRoom.name || 'Next Room');
-                        // Potentially update background if provided, or fetch new state
-                        // For now, a generic message or rely on next /look command
                         setCurrentRoomBackground(`Moved to ${gameData.nextRoom.name}. Type /look.`);
+                         // Fetch full state for the new room if backend doesn't provide all details
+                        fetchGameState();
                     }
                     if (gameData.gameCompleted) {
                         responseText += "\n\nCongratulations! You've completed the game!";
                         setCurrentRoomName('Game Completed!');
                         setCurrentRoomBackground('You can start a new game with /newgame.');
-                        setCurrentGameId(null); // Reset current game ID
+                        setCurrentGameId(null); 
                     }
-                    // Reflect any other changes from gameData to the CLI's state here
                 } else if (command.toLowerCase().startsWith('/look')) {
-                    // If it was a /look command and no structured data, perhaps re-fetch full state?
-                    // Or better, ensure /look from backend always returns structured room details.
-                    if (userId) fetchGameState(userId); // Re-fetch state after a look if needed
+                    fetchGameState(); 
                 }
             }
         } catch (err) {
             console.error('Error sending command:', err);
             responseText = 'Network error: Could not communicate with the backend.';
-            setIsConnected(false); // Assume connection lost
+            setIsConnected(false);
         } finally {
             setIsProcessingCommand(false);
             setLoadingMessage('');
@@ -216,97 +201,98 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: init
 
 	// Process natural language input through an LLM if API key is available
 	const processNaturalLanguage = async (text: string): Promise<string> => {
-        // Use the apiKey from state
-        const currentApiKey = apiKey || process.env['ANTHROPIC_API_KEY'] || process.env['OPENAI_API_KEY'];
-		if (!currentApiKey) {
-		    return "No API key configured or found.";
-		}
+
+		const apiKey = cliApiKey || process.env['OPENAI_API_KEY'] || process.env['ANTHROPIC_API_KEY'];
+		if (!apiKey) return "Error: No API key available for AI chat.";
+
+        if (!sessionToken) return "Error: Not authenticated for AI chat.";
+        // The cliApiKey is used to *enable* the UI option, but the actual key for the /chat call is now the user's stored one on backend.
+        // The backend /chat uses the API key associated with the user authenticated by sessionToken.
+        // However, the current backend /chat also expects an API key in Authorization header. This is a bit redundant.
+        // For now, let's assume the backend /chat relies on the user's stored key via session token.
+        // And the Authorization header is for the session token itself.
+        // If the backend /chat *still* requires an API key in its body or a different header, that needs to be addressed there.
+        // We will send the sessionToken for auth, and the backend /chat must use the user's registered API key.
+
         const apiUrl = getApiUrl();
-
 		setIsProcessingCommand(true);
-		setLoadingMessage(`Cooking with ${selectedModel.label}...`);
-
+		setLoadingMessage(`Thinking with ${selectedModel.label}...`);
 		try {
-		const response = await fetch(`${apiUrl}/api/chat`, {
+		    const response = await fetch(`${apiUrl}/api/chat`, {
 			method: 'POST',
 			headers: { 
-			'Content-Type': 'application/json',
-            // Use the state apiKey for the bearer token
-			'Authorization': `Bearer ${currentApiKey}`
+			    'Content-Type': 'application/json',
+			    'Authorization': `Bearer ${sessionToken}` // Authenticate the user session
 			},
 			body: JSON.stringify({ 
-			message: text,
-			model: selectedModel.value,
-            // Include userId from state
-			userId: userId 
+			    message: text,
+			    model: selectedModel.value,
+                // No userId here, backend gets it from token
+                // No apiKey here, backend uses user's stored key
 			}),
 		});
 
 		if (!response.ok) {
 			const errorData = await response.json();
-			console.error('API error:', errorData);
-			return `Sorry, there was an error processing your request: ${errorData.error || 'Unknown error'}`;
+			return `AI Chat Error: ${errorData.error || 'Unknown error'}`;
 		}
-
 		const data = await response.json();
-		return data.response || "I couldn't understand that. Please try a different command.";
+		return data.response || "AI couldn't understand that.";
 		} catch (error) {
-		console.error('Error processing natural language:', error);
-		return "Error processing your request. The backend server may not be running or AI model failed.";
+		    return "Error with AI chat request.";
 		} finally {
-		setIsProcessingCommand(false);
-		setLoadingMessage('');
+		    setIsProcessingCommand(false);
+		    setLoadingMessage('');
 		}
 	};
 
-	// Handle model selection ------------------------------------------------------------
-	const handleModelSelect = (model: ModelOption) => {
-		setSelectedModel(model);
-		return `Model changed to ${model.label}. ${model.description || ''}`;
-	};
 	// --------------------------------------------------------------------------------------------
-  
-
-	// Welcome Message
+	// 								INITIAL LOAD
+	// --------------------------------------------------------------------------------------------
 	useEffect(() => {
-		// Check connection to backend
 		checkBackendConnection();
-
-		// Add a short delay to simulate loading
 		const timer = setTimeout(() => {
 			setHistory([
-				{ type: 'response', text: 'Welcome to the Escape Room CLI!' },
-				...(hasAICapability ? [{ type: 'response' as const, text: 'AI assistance is enabled! You can use natural language to interact with the game.' }] : []),
+				{ type: 'response', text: 'Welcome to the AI Escape Room CLI!' },
+				...(hasAICapability ? [{ type: 'response' as const, text: 'AI assistance is available for hints and interaction.' }] : []),
 			]);
-		}, 1000);
-
+		}, 500);
 		return () => clearTimeout(timer);
-	}, [hasAICapability]);
-	// --------------------------------------------------------------------------------------------
-	// 						COMMAND HANDLERS HELPER FUNCTIONS
-	// --------------------------------------------------------------------------------------------
+	}, [hasAICapability]); // Rerun if AI capability changes (e.g. after registration with API key)
 
-	// `/help`
+
+	//-------------------------------------------------------------------------------------------------
+	// 				COMMAND HELPER FUNCTION
+	//-------------------------------------------------------------------------------------------------
+
 	const handleHelpCommand = () => {
 		return [
 		'Available commands:',
 		'/help - Show this help message',
-		'/look (or /seek) - Look around the room',
-		'/inspect [object] (or /analyse) - Inspect an object',
-		'/guess [password] (or /password) - Try a password',
-		'/hint - Get a hint (uses RoomAgent logic)',
-		// '/restart - Restart the current game (TODO: Implement backend support?)',
-        '/newgame [single-room|multi-room] - Start a new AI-generated game (default: single-room)',
+        ...(sessionToken ? [
+            '/look (or /seek) - Look around the room',
+            '/inspect [object] (or /analyse) - Inspect an object',
+            '/guess [password] (or /password) - Try a password',
+            '/hint - Get a hint',
+            '/newgame [single-room|multi-room] - Start a new AI-generated game',
+            '/status - Show current game status',
+            '/logout - End your current session',
+        ] : [
+            '/register - Start the registration process (or use CLI flags)',
+            '/login - Attempt to login (if config exists, usually automatic)',
+        ]),
 		'/history - Show command history',
-        '/status - Show current game status (if supported by backend)',
 		'/model - Change AI model (if AI enabled)',
 		// '/mcp - Switch to MCP client mode (NOT IMPLEMENTED YET)',
 
 		...(hasAICapability ? [
-			'AI assistance is enabled! Type natural language queries.',
 			`Current AI model: ${selectedModel.label}`
 		] : []),
-		`Current Room: "${currentRoomName}" (${currentGameMode})`
+        ...(sessionToken && currentRoomName !== 'Loading...' ? [
+            `Current Room: "${currentRoomName}" (${currentGameMode})`
+        ] : [
+            'Not currently in a game session.'
+        ]),
 		].join('\n');
 	};
 
@@ -314,25 +300,21 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: init
 	const handleGenerateNewGame = async (mode: string = 'single-room'): Promise<string> => {
         const requestedMode = (mode === 'multi-room') ? 'multi-room' : 'single-room';
         const apiUrl = getApiUrl();
-
-        // Ensure we have userId before starting a new game
-        if (!userId) {
-            return "Error: User ID not found. Cannot create a new game. Please restart or re-register.";
+        if (!sessionToken) {
+            return "Error: Not authenticated. Please login or register.";
         }
-
 		try {
 			setIsLoadingGame(true);
 			setLoadingMessage(`Preparing an AI-generated ${requestedMode} Escape Game...`);
-			
 			const response = await fetch(`${apiUrl}/api/newgame`, {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-                // Send the requested mode AND userId
-                body: JSON.stringify({ mode: requestedMode, userId: userId })
+				headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${sessionToken}`
+                },
+                body: JSON.stringify({ mode: requestedMode }) // No userId in body
 			});
-			
 			const data = await response.json();
-			
 			if (data.success && data.game) {
                 const gameInfo: GameInfo = data.game;
 				// Update state based on response
@@ -352,269 +334,206 @@ const Terminal: React.FC<TerminalProps> = ({ apiKey: initialApiKey, userId: init
 				return `Failed to create new game: ${data.error || "Unknown error"}`;
 			}
 		} catch (error) {
-			console.error('Error generating new game:', error);
-            setIsConnected(false); // Assume connection issue
-			return 'Error communicating with the server. Please ensure the backend is running.';
+			setIsConnected(false);
+			return 'Error communicating with the server.';
 		} finally {
 			setIsLoadingGame(false);
 			setLoadingMessage('');
 		}
 	};
+    
+    const handleLogout = () => {
+        setUserId(undefined);
+        setSessionToken(undefined);
+        setUserName(undefined);
+        setCliApiKey(undefined); // Clear session API key
+        setCurrentGameId(null);
+        setCurrentRoomName('Logged Out');
+        setCurrentRoomBackground('You have been logged out. Type /register or restart.');
+        setCurrentGameMode('unknown');
+        // Optionally clear the userId from local config to force full re-registration next time
+        try {
+            if (fs.existsSync(USER_CONFIG_FILE)) {
+                const config = JSON.parse(fs.readFileSync(USER_CONFIG_FILE, 'utf-8'));
+                delete config.userId; // Or just clear the whole file / specific sensitive parts
+                // fs.writeFileSync(USER_CONFIG_FILE, JSON.stringify(config, null, 2));
+                // For simplicity, let's just delete the config on logout to force re-reg
+                fs.unlinkSync(USER_CONFIG_FILE);
+                return "Logged out successfully. Local user session cleared.";
+            }
+        } catch (e) {
+            return "Logged out. Could not clear local config.";
+        }
+        return "Logged out successfully.";
+    };
 
-	// `/mcp`
-	const handleMcpCommand = async (command: string): Promise<string> => {
+	// ... (handleMcpCommand, handleCloseModelSelector, handleSelectModel remain similar) ...
+    const handleMcpCommand = async (command: string): Promise<string> => {
 		if (command === '/exit-mcp' || command === '/standard') {
 			setMcpMode(false);
 			setShowMcpClient(false);
 			return "Exiting MCP mode and returning to standard mode.";
 		}
-		
 		if (command === '/help') {
-			return [
-				"MCP Mode Commands:",
-				"/exit-mcp - Exit MCP mode and return to standard mode",
-				"/help - Show this help message",
-				"",
-				"MCP Tools:",
-				"/start_new_game - Start a new game",
-				"/seek_objects - List objects in the current room",
-				"/analyse_object [object] - Examine an object in detail",
-				"/submit_password [password] - Submit a password to try to unlock the room"
-			].join("\n");
+			return "MCP Help: ... TO BE IMPLEMENTED ...";
 		}
-		
-		// Forward the command to MCP component
-		// In a real implementation, we'd call a method on the McpClientUI component
 		return `MCP command processing not fully implemented yet: ${command}`;
 	};
+    const handleCloseModelSelector = () => setShowModelSelector(false);
 
-	// Handle Model Selector -----------------------------------------------------------------------
-	const handleCloseModelSelector = () => {
-		setShowModelSelector(false);
-	};
-	const handleSelectModel = (model: ModelOption) => {
-		const response = handleModelSelect(model);
-		setHistory(prev => [...prev, { type: 'response', text: response }]);
-	};
 	// --------------------------------------------------------------------------------------------
+	// 								MODEL SELECTOR
+	// --------------------------------------------------------------------------------------------
+	const handleSelectModel = (model: ModelOption) => {
+		setSelectedModel(model);
+		setHistory(prev => [...prev, { type: 'response', text: `Model changed to ${model.label}` }]);
+	};
 
 
 	// --------------------------------------------------------------------------------------------
 	// 								MAIN COMMAND HANDLER
 	// --------------------------------------------------------------------------------------------
 	const handleCommand = async (command: string) => {
-		// If model selector is shown, don't process commands
-		if (showModelSelector) {
-			return;
-		}
-		
-		// Add user command to history
+		if (showModelSelector) return;
 		setHistory(prev => [...prev, { type: 'command', text: command }]);
+		if (command !== '/history') setShowHistory(false);
 
-		// Turn off history display when running a new command (unless it's /history)
-		if (command !== '/history') {
-			setShowHistory(false);
-		}
-
-		// Check for special command /mcp to switch to MCP mode
 		if (command === '/mcp') {
-			const response = 'Switching to MCP client mode...';
-			setHistory(prev => [...prev, { type: 'response', text: response }]);
-			// Switch to MCP mode
+			setHistory(prev => [...prev, { type: 'response', text: 'Switching to MCP mode...' }]);
 			setMcpMode(true);
 			setShowMcpClient(true);
 			return;
 		}
 
-		// Process the command based on current mode
 		let response: string;
-
 		if (mcpMode) {
-			// Handle commands in MCP mode
 			response = await handleMcpCommand(command);
 		} else {
-		// Handle commands in standard mode (RoomAgent)
-		// Check if it's a slash command or natural language
-		if (command.startsWith('/')) {
-			// It's a slash command
-			const parts = command.trim().split(' ');
-			const cmd = parts[0]?.toLowerCase();
-			if (!cmd) {
-				response = "Unknown command. Try '/help', '/look', '/inspect', '/guess', '/hint', or '/restart'.";
-				setHistory(prev => [...prev, { type: 'response', text: response }]);
-				return;
-			}
-			let resp: string;
-			switch (cmd) {
-				case '/help':
-					resp = handleHelpCommand();
-					break;
-				case '/look':
-					resp = await sendCommand('/look');
-					break;
-				case '/inspect':
-					if (parts.length < 2) resp = 'Usage: inspect [object]';
-					else resp = await sendCommand(`/inspect ${parts.slice(1).join(' ')}`);
-					break;
-				case '/guess':
-					if (parts.length < 2) resp = 'Usage: guess [password]';
-					else resp = await sendCommand(`/guess ${parts.slice(1).join(' ')}`);
-					break;
-				case '/hint':
-					resp = await sendCommand('/hint');
-					break;
-				case '/restart':
-					// Restart: go back to room 1
-					setCurrentRoomName('Restarting...');
-					setCurrentRoomBackground('The game is ended or not started yet.\nType /newgame to start a new game, or /help for available commands.');
-					resp = 'Game restarted. Back to Room 1.';
-					break;
-				case '/newgame':
-					// Extract mode if provided (e.g., /newgame multi-room)
-					const modeArg = parts[1]?.toLowerCase();
-					resp = await handleGenerateNewGame(modeArg);
-					break;
-				case '/history':
-					setShowHistory(true);
-					resp = 'Showing command history:';
-					break;
-				case '/status':
-					// Send /status command to backend (needs backend implementation)
-					resp = await sendCommand('/status');
-					break;
-				case '/model':
-					if (hasAICapability) {
-						setShowModelSelector(true);
-						resp = 'Opening model selector...';
-					} else {
-						resp = 'AI assistance not enabled. Please set up an API key first.';
-					}
-					break;
-				default:
-					resp = "Unknown command. Try '/help', '/newgame', '/look', '/inspect', '/guess', '/hint', or '/restart'.";
-			}
-			response = resp;
-		} else {
-			// It's natural language - process with LLM if available
-			response = await processNaturalLanguage(command);
+		    if (command.startsWith('/')) {
+			    const parts = command.trim().split(' ');
+			    const cmd = parts[0]?.toLowerCase();
+			    if (!cmd) {
+                    response = "Unknown command.";
+                } else {
+                    switch (cmd) {
+                        case '/help': response = handleHelpCommand(); break;
+                        case '/logout': response = handleLogout(); break;
+                        case '/login': // Manual login / re-auth attempt
+                            response = "Login command: Please restart, or use registration if needed.";
+                            // Could trigger UserRegistration component if needed by resetting userId/token state
+                            // setUserId(undefined); setSessionToken(undefined); // This would show UserRegistration
+                            break;
+                        case '/register':
+                             response = "To register, please restart the application without a saved session, or use CLI flags.";
+                             // Or, setUserId(undefined); setSessionToken(undefined);
+                             break;
+                        // Protected commands below - require sessionToken
+                        case '/look': case '/seek': response = sessionToken ? await sendCommand('/look') : "Please login first."; break;
+                        case '/inspect': case '/analyse': 
+                            response = sessionToken ? (parts.length < 2 ? 'Usage: /inspect [object]' : await sendCommand(`/inspect ${parts.slice(1).join(' ')}`)) : "Please login first."; 
+                            break;
+                        case '/guess': case '/password':
+                            response = sessionToken ? (parts.length < 2 ? 'Usage: /guess [password]' : await sendCommand(`/guess ${parts.slice(1).join(' ')}`)) : "Please login first."; 
+                            break;
+                        case '/hint': response = sessionToken ? await sendCommand('/hint') : "Please login first."; break;
+                        case '/newgame': response = sessionToken ? await handleGenerateNewGame(parts[1]?.toLowerCase()) : "Please login first."; break;
+                        case '/status': response = sessionToken ? await sendCommand('/status') : "Please login first."; break;
+                        case '/history': setShowHistory(true); response = 'Showing command history:'; break;
+                        case '/model': 
+                            if (hasAICapability) { setShowModelSelector(true); response = 'Opening model selector...'; }
+                            else { response = 'AI features not available (no API key for session).'; }
+                            break;
+                        default: response = "Unknown command. Try /help.";
+                    }
+                }
+		    } else {
+                // Natural language - requires sessionToken for /api/chat
+                response = sessionToken ? await processNaturalLanguage(command) : "Please login or register to use AI chat.";
+            }
 		}
-		}
-
-		// Add response to history
 		setHistory(prev => [...prev, { type: 'response', text: response }]);
 	};
 	// ---------------------------------------------------------------------------------------------
 	
-	// Add handler for registration complete
-	const handleRegistrationComplete = (userData: { name: string; email?: string; apiKey?: string; userId?: string }) => {
+	const handleRegistrationComplete = (userData: { 
+        name: string; 
+        email?: string; 
+        userId?: string; 
+        token?: string; 
+        apiKey?: string 
+    }) => {
 		setUserId(userData.userId);
-		setApiKey(userData.apiKey);
-		// After registration, fetch initial game state if userId is present
-		if (userData.userId) {
-            fetchGameState(userData.userId);
+        setUserName(userData.name);
+		setSessionToken(userData.token);
+        setCliApiKey(userData.apiKey); // Store API key provided during this session registration/login
+		if (userData.userId && userData.token) {
+            fetchGameState(); // Fetch game state now that we are logged in
         } else {
-            checkBackendConnection(); // Fallback to general connection check if somehow no userId
+            checkBackendConnection(); 
         }
 	};
 
-	//RENDER COMPONENT
-	if (!userId) {
-		return <UserRegistration onRegistrationComplete={handleRegistrationComplete} username={initialUserId}/>;
+	if (!sessionToken || !userId) { // Show UserRegistration if no token or userId
+		return <UserRegistration onRegistrationComplete={handleRegistrationComplete} />;
 	}
+
 	return (
 		<Box flexDirection="column" width="100%">
 			<Box marginBottom={1} justifyContent="space-between">
                 <Box>
                     <Text bold color={mcpMode ? 'magenta' : 'cyan'}>
-                        [{mcpMode ? 'MCP Client Mode' : `${currentGameMode.toUpperCase()} Mode`}]
+                        {userName ? `${userName}'s Escape Room Game` : 'Escape Room'} [{mcpMode ? 'MCP' : `${currentGameMode.toUpperCase()}`}]
                     </Text>
                     {mcpMode && showMcpClient && (
-                        <Box marginLeft={1}><Text color="cyan">Type /help for MCP commands</Text></Box>
+                        <Box marginLeft={1}><Text color="cyan">MCP Help: /help</Text></Box>
                     )}
                     {hasAICapability && !mcpMode && (
                         <Box marginLeft={1}><Text color="green">✓ AI enabled: {selectedModel?.label}</Text></Box>
                     )}
                 </Box>
                 <Box>
-                     <Text color={isConnected ? "green" : "red"}>{isConnected ? "● Connected" : "◌ Disconnected"}</Text>
+                     <Text color={isConnected ? "green" : "red"}>{isConnected ? "● Online" : "◌ Offline"}</Text>
                 </Box>
 			</Box>
 			
 			{/* GAME GENERAL INFO (NAME AND BACKGROUND) */}
 			{!mcpMode && !isLoadingGame && !showModelSelector ? (
-				<Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="gray" paddingX={4}>
+				<Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="gray" paddingX={1} paddingY={0}>
 					<Gradient name="vice">
-						<Text bold>{currentRoomName || 'No game active'}</Text>
+						<Text bold>{currentRoomName || (sessionToken ? 'No game active' : 'Please login')}</Text>
 					</Gradient>
-					<Text color="gray" wrap="wrap">
-						{currentRoomBackground}</Text>
+					<Text color="gray" wrap="wrap">{currentRoomBackground}</Text>
 				</Box>
-			) : (
-				<Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="cyan" paddingX={4}>
-					<Box>
-						<Text color="cyan">
-							<Spinner type="dots" />
-						</Text>
-						<Text color="cyan">
-							Preparing AI-generated Escape Room...
-						</Text>
-					</Box>
+			) : isLoadingGame ? (
+				<Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="yellow" paddingX={1}>
+					<Box><Text color="cyan"><Spinner type="dots" /> {loadingMessage}</Text></Box>
 				</Box>
-			)}
+			) : null}
 
 			{showModelSelector ? (
-				<ModelSelector 
-					onSelect={handleSelectModel} 
-					onClose={handleCloseModelSelector} 
-				/>
+				<ModelSelector onSelect={handleSelectModel} onClose={handleCloseModelSelector} />
 			) : showMcpClient ? (
 				<>
-					{/* MCP CLIENT UI - FOR MCP MODE */}
-					<McpClientUI 
-						// userId={userId}
-						onMessage={(message) => setHistory(prev => [...prev, { type: 'response', text: message }])}
-					/>
-					<ScrollableBox height={20}>
-						<CommandHistory history={history} showHistory={showHistory} />
-					</ScrollableBox>
-					<Box marginTop={1}>
-						<CommandInput
-							value={currentCommand}
-							onChange={setCurrentCommand}
-							onSubmit={handleCommand}
-							mode={mcpMode ? 'mcp' : 'standard'}
-						/>
-					</Box>
+					<McpClientUI onMessage={(message) => setHistory(prev => [...prev, { type: 'response', text: message }])}/>
+					<ScrollableBox height={20}><CommandHistory history={history} showHistory={showHistory} /></ScrollableBox>
+					<CommandInput value={currentCommand} onChange={setCurrentCommand} onSubmit={handleCommand} mode={'mcp'} />
 				</>
 			) : (
 				<>
-					{/* COMMAND HISTORY - FOR BOTH MCP AND STANDARD MODE */}
-					<ScrollableBox height={25}>
-						<CommandHistory history={history} showHistory={showHistory} />
-					</ScrollableBox>
-
-					<Box flexDirection="column" marginTop={1}>
-						<Text color="gray">
-							Type /help for available commands or /newgame to start a new game.
-						</Text>
-						<CommandInput
-							value={currentCommand}
-							onChange={setCurrentCommand}
-							onSubmit={handleCommand}
-							mode={mcpMode ? 'mcp' : 'standard'}
-						/>
-					</Box>
+					<ScrollableBox height={25}><CommandHistory history={history} showHistory={showHistory} /></ScrollableBox>
+					<CommandInput value={currentCommand} onChange={setCurrentCommand} onSubmit={handleCommand} mode={'standard'}/>
 				</>
 			)}
 
-			{/* LOADING SPINNER IF COMMAND IS BEING PROCESSED */}
-			{isProcessingCommand && (
-				<Box flexDirection="column" marginBottom={1} padding={1} borderStyle="round" borderColor="yellow">
+			{isProcessingCommand && !isLoadingGame && (
+				<Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="yellow" paddingX={1}>
 					<Box>
-						<Text color="green">
-							<Spinner type="dots" />
+						<Text color="yellow"><Spinner type="dots" /> {loadingMessage}</Text>
+					</Box>
+					<Box>
+						<Text color="yellow">
+							Use /help for available commands.
 						</Text>
-						<Text color="yellow"> {loadingMessage}</Text>
 					</Box>
 				</Box>
 			)}

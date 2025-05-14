@@ -67,8 +67,8 @@ export default function App({ name = '', email = '', register = false }: Props) 
 					</Box>
 					<Terminal 
 						// mode={'standard'} 		
-						apiKey={userData.apiKey} 
-						userId={userData.userId}
+						// apiKey={userData.apiKey} 
+						// userId={userData.userId}
 					/>
 				</>
 			)}

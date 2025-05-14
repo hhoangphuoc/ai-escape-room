@@ -1,17 +1,26 @@
 // backend/api/server.ts
-import express, { Application, Request, Response, NextFunction } from 'express';
+import express, { Application, Request, Response, NextFunction, RequestHandler } from 'express';
 import cors from 'cors';
 import bodyParser from 'body-parser';
+import jwt from 'jsonwebtoken'; // Added for JWT
 import { ROOM_OBJECTS} from '../constant/objects'; // Adjust path as necessary
 import { RoomAgent, RoomData, type RoomCommandResponse } from '../agents/RoomAgent';
 import { MultiRoomGame } from '../agents/MultiRoomGame'; // Import MultiRoomGame
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid'; // For generating game IDs
-import { VERCEL_DOMAIN, LOCAL_API_PORT, LOCAL_API_URL } from '../constant/apiConfig'; // Added import
+import { VERCEL_DOMAIN, LOCAL_API_PORT, LOCAL_API_URL, getApiBaseUrl } from '../constant/apiConfig'; // Added import
 
 // Load environment variables
 dotenv.config();
+
+// IMPORTANT: Store this in .env for production!
+const JWT_SECRET = process.env.JWT_SECRET || 'very-secure-and-long-secret'; 
+
+// Custom Request type for JWT user
+interface AuthenticatedRequest extends Request {
+    user?: { id: string; name?: string }; // Add other user properties from token if needed
+}
 
 //-------------------------------- USER DATA --------------------------------
 interface User {
@@ -84,6 +93,25 @@ app.use(bodyParser.json()); // Parse JSON request bodies
 // Create a new Express Router for API endpoints
 const apiRouter = express.Router();
 
+// ---------- AUTHENTICATION MIDDLEWARE ------------------------------------------------------
+const jwtAuthentication = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    console.log("API: Authenticating token for userId", req.user?.id);
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1] || null; // Bearer TOKEN
+
+    if (token == null) return res.sendStatus(401); // if no token, unauthorized
+
+    jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
+        if (err) {
+            console.error("JWT Verification Error:", err.message);
+            return res.sendStatus(403); // if token is no longer valid
+        }
+        req.user = user as { id: string; name?: string }; // Add user payload to request object
+        next(); // proceed to the next middleware or route handler
+    });
+};
+//----------------------------------------------------------------------------------------
+
 // --- API Endpoints (now on apiRouter) ---
 
 apiRouter.get('/', (req: Request, res: Response) => {
@@ -105,22 +133,30 @@ apiRouter.get('/health', (req: Request, res: Response) => {
 });
 
 // POST /api/command - Process commands from CLI
-apiRouter.post('/command', (async (req, res) => {
+apiRouter.post('/command', (async (req: AuthenticatedRequest, res: Response) => {
+
+    // ---------------- jwt authentication before processing command --------------------------
+    jwtAuthentication(req, res, () => {
+    });
+    //----------------------------------------------------------------------------------------
+
+    // ----------------------------------- process command -----------------------------------
+
     // logger.info("Received /api/command request", { body: req.body });
     console.log("API: Received /api/command request", { body: req.body });
-    const { command, userId } = req.body;
-    console.log(`API: Received command: '${command}' for user: ${userId}`);
+    const { command } = req.body;
+    console.log(`API: Received command: '${command}' for user: ${req.user?.id}`);
 
-    if (!command || !userId) {
-        return res.status(400).json({ response: 'Command and userId are required.' });
+    if (!command) {
+        return res.status(400).json({ response: 'Command is required.' });
     }
 
-    const user = users[userId];
+    const user = users[req.user?.id];
     if (!user) {
         return res.status(401).json({ response: 'User not found or not registered.' });
     }
 
-    const userSession = userActiveGames[userId];
+    const userSession = userActiveGames[req.user?.id];
     if (!userSession) {
         return res.status(404).json({ response: 'No active game found for this user. Start a new game using /newgame.' });
     }
@@ -129,13 +165,13 @@ apiRouter.post('/command', (async (req, res) => {
     // API key is now part of the gameInstance (passed during its creation)
     // const apiKey = user.apiKeys?.openai || user.apiKeys?.anthropic;
     // if (!apiKey && (gameMode === 'multi-custom' || gameMode === 'single-custom')) {
-    // console.warn(`User ${userId} does not have a configured API key for potential generation.`);
+    // console.warn(`User ${req.user?.id} does not have a configured API key for potential generation.`);
     // return res.status(403).json(
     // { response: 'No API key configured for this user. Cannot process commands needing AI generation.' });
     // }
     
     try {
-        console.log(`API: Routing command to ${gameMode} game ID: ${userSession.gameId} for user ${userId}`);
+        console.log(`API: Routing command to ${gameMode} game ID: ${userSession.gameId} for user ${req.user?.id}`);
         // The gameInstance (RoomAgent or MultiRoomGame) handles its own API key usage internally
         const result: RoomCommandResponse = await gameInstance.process(command);
         
@@ -153,23 +189,33 @@ apiRouter.post('/command', (async (req, res) => {
              userSession.currentRoomName = roomData?.name || 'Unknown Room';
         }
 
-        res.json({ response: result.data?.message || result.response || 'Action processed.' });
+        res.json({ response: result.data?.message || result.response || 'Action processed.', data: result.data });
     } catch (error) {
-        console.error(`Error processing command in ${gameMode} game ${userSession.gameId} for user ${userId}:`, error);
+        console.error(`Error processing command in ${gameMode} game ${userSession.gameId} for user ${req.user?.id}:`, error);
         res.status(500).json({ response: `Error processing command in ${gameMode} game.` });
     }
 }) as any);
 
-// POST /api/newgame - Create a new escape room (single or multi)
-apiRouter.post('/newgame', (async (req: Request, res: Response) => {
-    console.log("API: Received /api/newgame request", { body: req.body });
-    const { mode = 'single-room', userId, roomCount, gameTheme } = req.body; // roomCount and gameTheme are new optional params
+//--------------------------------
 
-    if (!userId) {
-        return res.status(400).json({ success: false, error: "userId is required." });
+
+// POST /api/newgame - Create a new escape room (single or multi)
+apiRouter.post('/newgame', (async (req: AuthenticatedRequest, res: Response) => {
+    // ---------------- jwt authentication before processing command --------------------------
+    jwtAuthentication(req, res, () => {
+    });
+    //----------------------------------------------------------------------------------------
+
+    // ----------------------------------- process command -----------------------------------
+
+    console.log("API: Received /api/newgame request for user", req.user?.id, { body: req.body });
+    const { mode = 'single-room', roomCount, gameTheme } = req.body; // roomCount and gameTheme are new optional params
+
+    if (!req.user) {
+        return res.status(401).json({ success: false, error: "userId is required." });
     }
 
-    const user = users[userId];
+    const user = users[req.user.id];
     if (!user) {
         return res.status(401).json({ success: false, error: 'User not found or not registered.' });
     }
@@ -183,13 +229,13 @@ apiRouter.post('/newgame', (async (req: Request, res: Response) => {
     }
 
     // --- Clean up previous game for this user if any ---
-    if (userActiveGames[userId]) {
-        console.log(`API: Cleaning up previous game for user ${userId}.`);
+    if (userActiveGames[req.user.id]) {
+        console.log(`API: Cleaning up previous game for user ${req.user.id}.`);
         // Potentially call a cleanup method on the gameInstance if it exists
-        // e.g., userActiveGames[userId].gameInstance.cleanup();
-        delete userActiveGames[userId];
+        // e.g., userActiveGames[req.user.id].gameInstance.cleanup();
+        delete userActiveGames[req.user.id];
     }
-    //----------------------------------------------------
+    //----------------------------------------------------------------------------------------
 
     let newGameSession: UserGameSession | null = null;
     let initialRoomData: RoomData | null = null;
@@ -202,7 +248,7 @@ apiRouter.post('/newgame', (async (req: Request, res: Response) => {
     try {
         if (mode === 'single-room' || mode === 'single-custom') {
             actualGameMode = 'single-custom';
-            console.log(`API: Creating ${actualGameMode} game for user ${userId}...`);
+            console.log(`API: Creating ${actualGameMode} game for user ${req.user.id}...`);
             if (!apiKey) return res.status(403).json({ success: false, error: 'API key required for single-custom game.' });
 
             const agentIdNum = Date.now(); // Use timestamp for numeric ID for RoomAgent
@@ -211,7 +257,7 @@ apiRouter.post('/newgame', (async (req: Request, res: Response) => {
             initialRoomData = await newRoomAgent.ensureRoomData(apiKey);
 
             if (!initialRoomData) {
-                console.error(`API Error in /api/newgame (${actualGameMode}) for user ${userId}: Failed to get room data.`);
+                console.error(`API Error in /api/newgame (${actualGameMode}) for user ${req.user.id}: Failed to get room data.`);
                 return res.status(500).json({ success: false, error: "Failed to create new game. Could not generate valid room data." });
             }
             
@@ -229,7 +275,7 @@ apiRouter.post('/newgame', (async (req: Request, res: Response) => {
 
         } else if (mode === 'multi-room' || mode === 'multi-custom') {
             actualGameMode = 'multi-custom';
-            console.log(`API: Creating ${actualGameMode} game for user ${userId} with ${roomCount || 'default'} rooms and theme '${gameTheme || 'general horror'}'...`);
+            console.log(`API: Creating ${actualGameMode} game for user ${req.user.id} with ${roomCount || 'default'} rooms and theme '${gameTheme || 'general horror'}'...`);
             if (!apiKey) return res.status(403).json({ success: false, error: 'API key required for multi-custom game.' });
 
             const newGameId = uuidv4();
@@ -241,7 +287,7 @@ apiRouter.post('/newgame', (async (req: Request, res: Response) => {
             initialRoomData = firstRoomAgent.getRoomData();
 
             if (!initialRoomData) {
-                console.error(`API Error in /api/newgame (${actualGameMode}) for user ${userId}: Failed to initialize first room data.`);
+                console.error(`API Error in /api/newgame (${actualGameMode}) for user ${req.user.id}: Failed to initialize first room data.`);
                 return res.status(500).json({ success: false, error: "Failed to create multi-room game. Could not initialize first room." });
             }
 
@@ -266,12 +312,12 @@ apiRouter.post('/newgame', (async (req: Request, res: Response) => {
             // Or, a dedicated 'DefaultGameManager' could be introduced.
             // For now, let's instantiate the first default room.
             actualGameMode = 'default';
-            console.log(`API: Creating ${actualGameMode} game (Room 1) for user ${userId}...`);
+            console.log(`API: Creating ${actualGameMode} game (Room 1) for user ${req.user.id}...`);
             
             const defaultRoomId = 1; // Start with the first predefined room
             const templateAgent = defaultRoomAgents[defaultRoomId];
             if (!templateAgent) {
-                 console.error(`API Error in /api/newgame (default) for user ${userId}: Default room agent for ID ${defaultRoomId} not found.`);
+                 console.error(`API Error in /api/newgame (default) for user ${req.user.id}: Default room agent for ID ${defaultRoomId} not found.`);
                  return res.status(500).json({ success: false, error: "Failed to create default game. Room template not found." });
             }
             // Create a new instance for the user session, even for default rooms
@@ -280,7 +326,7 @@ apiRouter.post('/newgame', (async (req: Request, res: Response) => {
             initialRoomData = userDefaultRoomAgent.getRoomData(); // Should be immediately available
 
             if (!initialRoomData) {
-                console.error(`API Error in /api/newgame (default) for user ${userId}: Failed to load data for default room ${defaultRoomId}.`);
+                console.error(`API Error in /api/newgame (default) for user ${req.user.id}: Failed to load data for default room ${defaultRoomId}.`);
                 return res.status(500).json({ success: false, error: "Failed to create default game. Could not load room data." });
             }
 
@@ -297,13 +343,13 @@ apiRouter.post('/newgame', (async (req: Request, res: Response) => {
             responseTotalRooms = Object.keys(ROOM_OBJECTS).length;
 
         } else {
-            console.error(`API: Invalid mode specified in /api/newgame: ${mode} for user ${userId}`);
+            console.error(`API: Invalid mode specified in /api/newgame: ${mode} for user ${req.user.id}`);
             return res.status(400).json({ success: false, error: "Invalid game mode specified. Use 'single-room', 'multi-room', or 'default'." });
         }
 
         if (newGameSession && initialRoomData) {
-            userActiveGames[userId] = newGameSession;
-            console.log(`API: New game created successfully for user ${userId}. Mode: [${actualGameMode}] - GameID: [${newGameSession.gameId}]`);
+            userActiveGames[req.user.id] = newGameSession;
+            console.log(`API: New game created successfully for user ${req.user.id}. Mode: [${actualGameMode}] - GameID: [${newGameSession.gameId}]`);
             res.json({
                 success: true,
                 message: `New ${actualGameMode} game started. You're in room ${responseInitialRoomSequence}: ${responseGameName}.`,
@@ -324,9 +370,9 @@ apiRouter.post('/newgame', (async (req: Request, res: Response) => {
         }
 
     } catch (error) {
-        console.error(`API: Error in /api/newgame for user ${userId}, mode ${mode}:`, error);
+        console.error(`API: Error in /api/newgame for user ${req.user.id}, mode ${mode}:`, error);
         // Ensure no partial game state for the user if an error occurred
-        delete userActiveGames[userId]; 
+        delete userActiveGames[req.user.id]; 
         res.status(500).json({
             success: false,
             error: "Failed to create new game. An internal error occurred.",
@@ -334,19 +380,18 @@ apiRouter.post('/newgame', (async (req: Request, res: Response) => {
         });
     }
 }) as any);
+//---------------------------------------------------------------------------------------------------------
 
 // GET /game/state - Get current game state for a user
-apiRouter.get('/game/state', ((req: Request, res: Response) => {
-    const userId = req.query.userId as string;
-    console.log(`API: Received /game/state request for user ${userId}`);
+apiRouter.get('/game/state', (async (req: AuthenticatedRequest, res: Response) => {
+    // jwt authentication before processing command --------------------------
+    jwtAuthentication(req, res, () => {
+    });
 
-    if (!userId) {
-        return res.status(400).json({ error: "userId query parameter is required." });
-    }
-    const user = users[userId];
-    if (!user) {
-        return res.status(401).json({ error: 'User not found or not registered.' });
-    }
+    // process command -----------------------------------
+    if (!req.user) return res.sendStatus(401);
+    const userId = req.user.id;
+    console.log(`API: Received /game/state request for user ${userId}`);
 
     const userSession = userActiveGames[userId];
     if (!userSession) {
@@ -395,19 +440,18 @@ apiRouter.get('/game/state', ((req: Request, res: Response) => {
         res.status(500).json({ error: "Failed to get game state." });
     }
 }) as any);
+//---------------------------------------------------------------------------------------------------------
 
 // GET /room/objects - List objects in the current room for a user
-apiRouter.get('/room/objects', (async (req: Request, res: Response) => {
-    const userId = req.query.userId as string;
-    console.log(`API: Received /room/objects request for user ${userId}`);
+apiRouter.get('/room/objects', (async (req: AuthenticatedRequest, res: Response) => {
+    // jwt authentication before processing command --------------------------
+    jwtAuthentication(req, res, () => {
+    });
 
-    if (!userId) {
-        return res.status(400).json({ error: "userId query parameter is required." });
-    }
-    const user = users[userId];
-    if (!user) {
-        return res.status(401).json({ error: 'User not found or not registered.' });
-    }
+    // process command -----------------------------------
+    if (!req.user) return res.sendStatus(401);
+    const userId = req.user.id;
+    console.log(`API: Received /room/objects request for user ${userId}`);
 
     const userSession = userActiveGames[userId];
     if (!userSession) {
@@ -428,20 +472,21 @@ apiRouter.get('/room/objects', (async (req: Request, res: Response) => {
         res.status(500).json({ error: "Failed to get room objects." });
     }
 }) as any);
+//---------------------------------------------------------------------------------------------------------
 
-// GET /object/:object_name - Get details of a specific object for a user
-apiRouter.get('/object/:object_name', (async (req, res) => {
-    const userId = req.query.userId as string;
+
+// GET /object/:object_name
+// Get details of a specific object for a user
+apiRouter.get('/object/:object_name', (async (req: AuthenticatedRequest, res: Response) => {
+    // jwt authentication before processing command --------------------------
+    jwtAuthentication(req, res, () => {
+    });
+
+    // ----------------------------------- process command -----------------------------------
+    if (!req.user) return res.sendStatus(401);
+    const userId = req.user.id;
     const objectNameParam = req.params.object_name;
     console.log(`API: Received /object/${objectNameParam} request for user ${userId}`);
-
-    if (!userId) {
-        return res.status(400).json({ error: "userId query parameter is required." });
-    }
-     const user = users[userId];
-    if (!user) {
-        return res.status(401).json({ error: 'User not found or not registered.' });
-    }
 
     const userSession = userActiveGames[userId];
     if (!userSession) {
@@ -463,13 +508,20 @@ apiRouter.get('/object/:object_name', (async (req, res) => {
         res.status(500).json({ error: `Failed to get object details.` });
     }
 }) as any);
+//---------------------------------------------------------------------------------------------------------
 
-apiRouter.post('/room/unlock', (async (req, res) => {
-    const { userId, password_guess } = req.body;
+// POST /room/unlock
+// Unlock a room for a user
+apiRouter.post('/room/unlock', (async (req: AuthenticatedRequest, res: Response) => {
+    // jwt authentication before processing command --------------------------
+    jwtAuthentication(req, res, () => {
+    });
+
+    // process command -----------------------------------
+    if (!req.user) return res.sendStatus(401);
+    const userId = req.user.id;
+    const { password_guess } = req.body;
     console.log(`API: Received /room/unlock request for user ${userId}`);
-    if (!userId) {
-        return res.status(400).json({ error: "userId is required in the body." });
-    }
     if (typeof password_guess !== 'string') {
         return res.status(400).json({ error: 'Password guess must be a string.' });
     }
@@ -536,148 +588,197 @@ apiRouter.post('/room/unlock', (async (req, res) => {
         res.status(500).json({ error: "Failed to process unlock attempt." });
     }
 }) as any);
+//---------------------------------------------------------------------------------------------------------
 
+// POST /users/register
+// Register a new user
 apiRouter.post('/users/register', ((req: Request, res: Response) => {
   const { name, email, apiKey, provider = 'openai' } = req.body;
   if (!name) {
     return res.status(400).json({ error: 'Name is required' });
   }
   const userId = uuidv4();
-  users[userId] = {
+  const newUser: User = {
     id: userId,
     name,
     email,
     apiKeys: apiKey ? { [provider]: apiKey } : undefined,
     registeredAt: new Date().toISOString()
   };
+  users[userId] = newUser;
+  const accessToken = jwt.sign({ id: userId, name: name }, JWT_SECRET, { expiresIn: '24h' });
   console.log(`API: User registered: ${name} (${userId})`);
   res.json({ 
     userId,
-    user: { name, email }
+    name: newUser.name,
+    email: newUser.email,
+    token: accessToken
   });
 }) as any);
+//---------------------------------------------------------------------------------------------------------
 
-apiRouter.post('/users/auth', ((req: Request, res: Response) => {
-  const { userId } = req.body;
-  if (!userId || !users[userId]) {
-    return res.status(401).json({ error: 'User not found' });
-  }
-  const { apiKeys, ...userData } = users[userId];
-  console.log(`API: User authenticated: ${userData.name} (${userId})`);
-  res.json({ 
-    authenticated: true,
-    user: userData
-  });
-}) as any);
-
-apiRouter.post('/users/get-api-key', ((req: Request, res: Response) => {
-  const { userId, provider = 'openai' } = req.body;
-  if (!userId || !users[userId]) {
-    return res.status(401).json({ error: 'User not found' });
-  }
-  const user = users[userId];
-  const apiKeyVal = user.apiKeys?.[provider]; // Renamed to avoid conflict with imported apiKey
-  if (!apiKeyVal) {
-    return res.status(404).json({ error: `No API key found for provider: ${provider}` });
-  }
-  console.log(`API: API key retrieved for user: ${user.name} (${userId}), provider: ${provider}`);
-  res.json({ 
-    apiKey: apiKeyVal, 
-    provider
-  });
-}) as any);
-
-apiRouter.post('/chat', (async (req: Request, res: Response) => {
-  const { message, model, userId: chatUserId } = req.body; 
-  if (!chatUserId) {
-      return res.status(400).json({ error: "userId is required for chat context."});
-  }
-  const user = users[chatUserId];
-  if (!user) {
-      return res.status(401).json({ error: "User for chat not found." });
-  }
-  const userApiKey = user.apiKeys?.openai || user.apiKeys?.anthropic; 
-  if (!userApiKey) {
-      return res.status(403).json({ error: "User does not have a configured API key for the chat AI." });
-  }
-  const userSession = userActiveGames[chatUserId];
-  let roomContext = "You are an AI assistant in an escape room game.";
-  let objectsContext = "No specific game active or objects loaded.";
-  if (userSession) {
-      const { gameInstance } = userSession;
-      let currentRoomData: RoomData | null = null;
-      if (gameInstance instanceof MultiRoomGame) {
-          currentRoomData = gameInstance.getCurrentRoom().getRoomData();
-      } else if (gameInstance instanceof RoomAgent) {
-          currentRoomData = gameInstance.getRoomData();
-      }
-      if (currentRoomData) {
-          roomContext = `You are in ${currentRoomData.name}. ${currentRoomData.background || ''}`;
-          if (currentRoomData.objects) {
-              const objArray = Array.isArray(currentRoomData.objects) ? currentRoomData.objects : Object.values(currentRoomData.objects);
-              objectsContext = objArray.map(o => `${o.name}: ${o.description}`).join('\n');
-          } else {
-              objectsContext = 'No objects information available in this room.';
-          }
-      } else {
-          roomContext = "You are an AI assistant in an escape room game. The current room details could not be loaded.";
-      }
-  }
-  try {
-    console.log(`API: Processing natural input with model: ${model} for user ${chatUserId}`);
-    let responseText;
-    const model_specs: Record<string, any> = {
-      'gpt-4o': { max_completion_tokens: 4098 },
-      'gpt-4o-mini': { max_completion_tokens: 1024 }, 
-      'gpt-4.1': { max_completion_tokens: 4098 }, 
-      'claude-3-opus-20240229': { max_tokens: 4096 },
-      'claude-3-sonnet-20240229': { max_tokens: 4096 },
-      'claude-3-haiku-20240307': { max_tokens: 4096 },
-      'claude-2.1': { max_tokens: 4000 },
-    };
-    const currentModelSpec = model_specs[model] || { max_completion_tokens: 1024, max_tokens: 1024 };
-    if (model.startsWith('gpt') || model.includes('gpt') || model.startsWith('oai')) {
-      const openai = new OpenAI({ apiKey: userApiKey });
-      const completion = await openai.chat.completions.create({
-        model,
-        messages: [
-          { role: "system", content: `You are an AI assistant in an escape room game. Help the player solve puzzles without giving away solutions directly. Current room information: ${roomContext} Objects in room: ${objectsContext}` },
-          { role: "user", content: message }
-        ],
-        max_tokens: currentModelSpec.max_completion_tokens
-      });
-      responseText = completion.choices[0].message.content;
-    } else if (model.startsWith('claude')) {
-      const Anthropic = require('@anthropic-ai/sdk').default;
-      const anthropic = new Anthropic({ apiKey: userApiKey });
-      const anthropicResponse = await anthropic.messages.create({
-        model,
-        max_tokens: currentModelSpec.max_tokens,
-        system: `You are an AI assistant in an escape room game. Help the player solve puzzles without giving away solutions directly. Current room information: ${roomContext} Objects in room: ${objectsContext}`,
-        messages: [{ role: "user", content: message }]
-      });
-      if (Array.isArray(anthropicResponse.content)) {
-        responseText = anthropicResponse.content.map(block => block.type === 'text' ? block.text : '').join('');
-      } else {
-        responseText = (anthropicResponse.content as any).text || JSON.stringify(anthropicResponse.content);
-      }
-    } else {
-        return res.status(400).json({ error: `Unsupported model provider for: ${model}` });
+// POST /users/login
+// Login a user
+apiRouter.post('/users/login', ((req: Request, res: Response) => {
+    const { userId } = req.body;
+    if (!userId) {
+        return res.status(400).json({ error: 'userId is required for login.' });
     }
-    res.json({ response: responseText });
-  } catch (error) {
-    console.error('Error processing chat:', error);
-    res.status(500).json({ 
-      error: 'Error processing chat request',
-      details: error instanceof Error ? error.message : 'Unknown error'
+    const user = users[userId];
+    if (!user) {
+        return res.status(404).json({ error: 'User not found.' });
+    }
+    const accessToken = jwt.sign({ id: user.id, name: user.name }, JWT_SECRET, { expiresIn: '24h' });
+    console.log(`API: User logged in: ${user.name} (${user.id})`);
+    res.json({
+        userId: user.id,
+        name: user.name,
+        email: user.email,
+        token: accessToken
     });
-  }
 }) as any);
 
+// GET /users/me
+// Get user's own details (excluding API keys)
+apiRouter.get('/users/me', (async (req: AuthenticatedRequest, res: Response) => {
+    // jwt authentication before processing command --------------------------
+    jwtAuthentication(req, res, () => {
+    });
+
+    // process command -----------------------------------
+    if (!req.user) return res.sendStatus(401);
+    const user = users[req.user.id];
+    if (!user) return res.sendStatus(404); 
+    const { apiKeys, ...userData } = user; // Exclude API keys
+    res.json(userData);
+}) as any);
+//---------------------------------------------------------------------------------------------------------
+
+
+// POST /users/auth
+// Authenticate user by userId
+apiRouter.post('/users/auth', (async (req: Request, res: Response) => {
+    // jwt authentication before processing command --------------------------
+    jwtAuthentication(req, res, () => {
+    });
+
+    // process command -----------------------------------
+    const { userId } = req.body;
+    if (!userId || !users[userId]) {
+        return res.status(401).json({ error: 'User not found' });
+    }
+    const { apiKeys, ...userData } = users[userId];
+    console.log(`API: User authenticated: ${userData.name} (${userId})`);
+    res.json({ 
+        authenticated: true,
+        user: userData
+    });
+}) as any);
+//---------------------------------------------------------------------------------------------------------
+
+// POST /users/get-api-key
+// Get user's API key
+apiRouter.post('/users/get-api-key', (async (req: Request, res: Response) => {
+    const { userId, provider = 'openai' } = req.body;
+    if (!userId || !users[userId]) {
+        return res.status(401).json({ error: 'User not found' });
+    }
+    const user = users[userId];
+    const apiKeyVal = user.apiKeys?.[provider]; // Renamed to avoid conflict with imported apiKey
+    if (!apiKeyVal) {
+        return res.status(404).json({ error: `No API key found for provider: ${provider}` });
+    }
+    console.log(`API: API key retrieved for user: ${user.name} (${userId}), provider: ${provider}`);
+    res.json({ 
+        apiKey: apiKeyVal, 
+        provider
+    });
+}) as any);
+//---------------------------------------------------------------------------------------------------------
+
+// POST /chat
+// Chat with the AI through own API Key
+apiRouter.post('/chat', (async (req: AuthenticatedRequest, res: Response) => {
+    // jwt authentication before processing command --------------------------
+    jwtAuthentication(req, res, () => {
+    });
+
+    // ----------------------------------- process command -----------------------------------
+    if (!req.user?.id) return res.sendStatus(401);
+    const chatUserId = req.user.id;
+    const { message, model } = req.body;
+    const user = users[chatUserId];
+    if (!user) {
+        return res.status(401).json({ error: "User for chat not found." });
+    }
+    const userApiKey = user.apiKeys?.openai || user.apiKeys?.anthropic;
+    if (!userApiKey) {
+        return res.status(403).json({ error: "User API key not configured for chat." });
+    }
+    const userSession = userActiveGames[chatUserId];
+    let roomContext = "AI assistant in an escape room game.";
+    let objectsContext = "No game active or objects loaded.";
+    if (userSession) {
+        const { gameInstance } = userSession;
+        let currentRoomData: RoomData | null = null;
+        if (gameInstance instanceof MultiRoomGame) {
+            currentRoomData = gameInstance.getCurrentRoom().getRoomData();
+        } else if (gameInstance instanceof RoomAgent) {
+            currentRoomData = gameInstance.getRoomData();
+        }
+        if (currentRoomData) {
+            roomContext = `In ${currentRoomData.name}. ${currentRoomData.background || ''}`;
+            objectsContext = currentRoomData.objects ? 
+                            (Array.isArray(currentRoomData.objects) ? currentRoomData.objects : Object.values(currentRoomData.objects))
+                            .map(o => `${o.name}: ${o.description}`).join('\n') 
+                            : 'No objects in this room.';
+        }
+    }
+    try {
+        let responseText;
+        const model_specs: Record<string, any> = {
+        'gpt-4o': { max_completion_tokens: 4098 }, 'gpt-4o-mini': { max_completion_tokens: 1024 }, 
+        'gpt-4.1': { max_completion_tokens: 4098 }, 'claude-3-opus-20240229': { max_tokens: 4096 },
+        'claude-3-sonnet-20240229': { max_tokens: 4096 }, 'claude-3-haiku-20240307': { max_tokens: 4096 },
+        'claude-2.1': { max_tokens: 4000 },
+        };
+        const currentModelSpec = model_specs[model] || { max_completion_tokens: 1024, max_tokens: 1024 };
+        const systemContent = `You are an AI assistant in an escape room. Current room: ${roomContext} Objects: ${objectsContext}`;
+
+        if (model.startsWith('gpt') || model.includes('gpt') || model.startsWith('oai')) {
+        const openai = new OpenAI({ apiKey: userApiKey });
+        const completion = await openai.chat.completions.create({
+            model, messages: [{ role: "system", content: systemContent }, { role: "user", content: message }],
+            max_tokens: currentModelSpec.max_completion_tokens
+        });
+        responseText = completion.choices[0].message.content;
+        } else if (model.startsWith('claude')) {
+        const Anthropic = require('@anthropic-ai/sdk').default;
+        const anthropic = new Anthropic({ apiKey: userApiKey });
+        const anthropicResponse = await anthropic.messages.create({
+            model, max_tokens: currentModelSpec.max_tokens, system: systemContent, 
+            messages: [{ role: "user", content: message }]
+        });
+        responseText = Array.isArray(anthropicResponse.content) ? 
+                        anthropicResponse.content.map(b => b.type === 'text' ? b.text : '').join('') : 
+                        (anthropicResponse.content as any).text;
+        } else {
+            return res.status(400).json({ error: `Unsupported model: ${model}` });
+        }
+        res.json({ response: responseText });
+    } catch (error) {
+        res.status(500).json({ error: 'Chat request failed.', details: error instanceof Error ? error.message : String(error) });
+    }
+}) as any);
+//---------------------------------------------------------------------------------------------------------
+
+
+//TESTING POST --------------------------------------------------------------------------------------------
 apiRouter.post('/users/test-post', (req: Request, res: Response) => { 
-  console.log("API: Accessed /users/test-post successfully!", { body: req.body });
-  res.status(200).json({ message: 'POST test to /users/test-post successful', receivedBody: req.body });
+    console.log("API: Accessed /users/test-post successfully!", { body: req.body });
+    res.status(200).json({ message: 'POST test to /users/test-post successful', receivedBody: req.body });
 });
+//---------------------------------------------------------------------------------------------------------
 
 app.use('/api', apiRouter);
 
@@ -685,5 +786,14 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
     console.error("API: Unhandled API Error", err);
     res.status(500).json({ error: 'An internal server error occurred.' });
 });
+
+// Start the server only if this script is run directly (e.g., for local development)
+// For Vercel, the runtime will import 'app' and handle listening.
+if (require.main === module) {
+  app.listen(port, () => {
+    console.log(`[API Server] Listening on http://localhost:${port}`);
+    console.log(`[API Server] Configured base URL: ${getApiBaseUrl()}`);
+  });
+}
 
 export default app;
