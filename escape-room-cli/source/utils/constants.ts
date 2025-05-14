@@ -17,15 +17,15 @@ export const COMMANDS: CommandCollection = {
 		usage: '/help',
 	},
 	'/newgame': {
-		description: 'Starts a new game, resetting progress of the current room.',
-		usage: '/newgame',
+		description: 'Starts a new AI-generated escape room for you.',
+		usage: '/newgame [single-room|multi-room]',
 	},
 	'/history': {
 		description: 'Shows the history of commands and responses',
 		usage: '/history',
 	},
 	'/look': {
-		description: 'Look around the room',
+		description: 'Look around the room for clues or objects',
 		usage: '/look',
 	},
 	'/inspect': {
@@ -40,13 +40,25 @@ export const COMMANDS: CommandCollection = {
 		description: 'Get a hint for the current room',
 		usage: '/hint',
 	},
-	'/restart': {
-		description: 'Restart the game',
-		usage: '/restart',
+	'/logout': {
+		description: 'Logout to current session and your account.',
+		usage: '/logout',
+	},
+	'/login': {
+		description: 'Login to your account (if config exists, usually automatic)',
+		usage: '/login',
+	},
+	'/register': {
+		description: 'Register a new account, or re-register if you already have one.',
+		usage: '/register',
 	},
 	'/model': {
-		description: 'Change AI model',
+		description: 'Change AI model that you want to use.',
 		usage: '/model',
+	},
+	'/status': {
+		description: 'Shows the current status of the game.',
+		usage: '/status',
 	},
 	'/mcp': {
 		description: 'Switch to MCP client mode',

@@ -120,7 +120,7 @@ const CommandInput: React.FC<CommandInputProps> = ({
 					borderColor="gray"
 				>
 					<Box marginBottom={1}>
-						<Text bold> Available Commands</Text>
+						<Text bold color="cyan"> Available Commands</Text>
 					</Box>
 					{Object.entries(filteredCommands).map(([cmd, details]) => (
 						<Box key={cmd}>
@@ -128,10 +128,10 @@ const CommandInput: React.FC<CommandInputProps> = ({
 								color={cmd === value ? 'cyan' : 'white'}
 								bold={cmd === value}
 							>
-								{cmd.padEnd(15)}
+								{details.usage.padEnd(40)}
 							</Text>
 							<Text
-								color={cmd === value ? 'cyan' : 'white'}
+								color={cmd === value ? 'cyan' : 'gray'}
 								bold={cmd === value}
 							>
 								{details.description}
