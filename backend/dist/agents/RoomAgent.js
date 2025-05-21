@@ -85,22 +85,23 @@ class RoomAgent {
                 console.log(`Generating single custom room (ID: ${this.roomId})`);
             }
             const response = await openai.chat.completions.create({
-                model: 'gpt-4o',
+                model: 'gpt-4.1-mini',
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userPrompt }
                 ],
                 response_format: { type: "json_object" },
-                temperature: 1,
-                max_tokens: 2048,
+                temperature: 0.7,
+                max_tokens: 10000,
             });
             const content = response.choices[0]?.message?.content;
             if (content) {
                 try {
                     const generatedData = JSON.parse(content);
                     if (generatedData.name && generatedData.background && generatedData.password && generatedData.objects) {
-                        this.roomData = { ...generatedData, id: this.roomId, sequence: this.sequence };
+                        this.roomData = { ...generatedData, id: this.roomId, sequence: this.sequence }; //parsing the GameData object to this.roomData
                         console.log(`Successfully generated room data for ID: ${this.roomId}`);
+                        console.log('Generated room data:', this.roomData);
                     }
                     else {
                         console.error('Generated JSON lacks required fields for room ID:', this.roomId);
