@@ -1,6 +1,4 @@
 // backend/api/auth/jwtMiddleware.ts
-console.log('[jwtAuth] File loaded and jwtAuth defined.');
-
 import { Request, Response, NextFunction } from 'express';
 import jwt, { JwtPayload } from 'jsonwebtoken';
 

@@ -77,6 +77,7 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
             setCurrentApiKeyProvider('anthropic');
           }
 
+          //LOGIN INSTEAD OF REGISTER --------------------------------------------------------------------------------------------------
           if (loadedConfig.userId && initialName) { // Ensure name is also present
             const apiUrl = getApiUrl();
             const loginResponse = await fetch(`${apiUrl}/api/users/login`, {
@@ -84,7 +85,7 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ userId: loadedConfig.userId }),
             });
-            const loginData = await loginResponse.json();
+            const loginData = await loginResponse.json() as any; //FIXME: as { token: string; error?: string };
 
             if (loginResponse.ok && loginData.token) {
               setMessage('Welcome back! Session restored.');
@@ -105,11 +106,14 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
               setMessage(`Login attempt failed: ${loginData.error || 'Could not restore session.'}. Please verify details or register.`);
             }
           }
+          // ------------------------------------------------------------------------------------------------------------------------------
         }
       } catch (error) {
         setMessage('Could not load config or login. Please register.');
       }
+      
 
+      // FALLBACK TO MANUAL REGISTRATION --------------------------------------------------------------------------------------------------
       if (proceedToManualReg) {
         if (!currentCliApiKey) { // If no API key from config, check ENV
             const openaiEnvKey = process.env['OPENAI_API_KEY'];
@@ -170,7 +174,7 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(registrationPayload)
       });
-      const data = await response.json();
+      const data = await response.json() as any; //FIXME: as { userId: string; token: string; error?: string };
       if (response.ok && data.userId && data.token) {
         receivedUserId = data.userId;
         receivedToken = data.token;
@@ -250,15 +254,9 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
     return (
       <Box flexDirection="column" padding={1}>
         <Text bold color="cyan">Your AI API Key (OpenAI or Anthropic):</Text>
-        <Text color="gray">This will be stored in {USER_CONFIG_FILE}</Text>
         <Box marginTop={1} flexDirection="row" alignItems="center">
             <Text color="cyan">Current AI Provider: </Text>
             <Text> [{currentApiKeyProvider.toUpperCase()}] </Text>
-            {/* <SelectInput items={[{ label: 'OpenAI', value: 'openai' }, { label: 'Anthropic', value: 'anthropic' }]} onSelect={
-              (item) => {
-                setCurrentApiKeyProvider(item.value as 'openai' | 'anthropic');
-              }
-            }/> */}
         </Box>
         <Box>
           <Text color="cyan">API Key: </Text>
@@ -272,7 +270,7 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
           />
         </Box>
         <Box marginTop={1}>
-          {currentCliApiKey && <Text color="gray">Your key will be registered & stored locally.</Text>}
+          {currentCliApiKey && <Text color="gray">Your key will be registered & stored locally in {USER_CONFIG_FILE}</Text>}
         </Box>
         <Box marginTop={1}>
           <Text color="cyan">Press Enter to register and save.</Text>

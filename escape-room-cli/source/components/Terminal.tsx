@@ -10,12 +10,14 @@ import McpClientUI from './McpClientUI.js';
 import { MODELS_COLLECTION, type ModelOption } from '../utils/constants.js';
 import { getApiUrl } from '../utils/apiConfig.js';
 import UserRegistration from './UserRegistration.js';
+
+// FOR LOGOUT ----------------------------------------------------------------------------------------
 import fs from 'fs'; // For logout config clear
 import path from 'path'; // For logout config clear
 import os from 'os'; // For logout config clear
 
 const USER_CONFIG_FILE = path.join(os.homedir(), '.escape-room-config.json'); // For logout
-
+// --------------------------------------------------------------------------------------------------
 interface TerminalProps {
 	// mode: 'standard' | 'mcp';
 	// These initial props might be less relevant if UserRegistration handles initial load
@@ -90,8 +92,15 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                 if (sessionToken && userId) { // Only fetch game state if logged in
                     fetchGameState();
                 } else {
-                    setCurrentRoomName('Logged In. Game Not Created');
-                    setCurrentRoomBackground('Please create a new game with /newgame. Type /help for more info.');
+                    // setCurrentRoomName('Logged In. Game Not Created');
+                    // setCurrentRoomBackground('Please create a new game with /newgame. Type /help for more info.');
+					setCurrentRoomName('Instructions:');
+					setCurrentRoomBackground(`This is the beginning of everything. Explore the AI Escape Room and solve the puzzle as fast as you can to escape.
+						\nIn this room, you will have to find a password to unlock the door. There are several puzzles scattered around the room, underneath the objects. Every puzzle have it's own way, but don't worry, it all leads you to the password, one way or another ;) Discover them all to find out.
+						\nYou can do it manually, ask the AI, or build your own strategy. Your choice ;)
+						\nReady to challenge? Type /newgame to start. Or type /help for more information.
+						
+						\n PS: Use an AI is always easier, is it true?`);
                 }
             } else {
                 setCurrentRoomName('Connection Error');
@@ -108,8 +117,13 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
     const fetchGameState = async () => {
         if (!sessionToken) {
             console.warn("fetchGameState called without a sessionToken.");
-            setCurrentRoomName('Not Logged In');
-            setCurrentRoomBackground('Please /login or /register. Type /help for more info.');
+            // setCurrentRoomName('Instructions:');
+            // setCurrentRoomBackground(`This is the beginning of everything. Explore the AI Escape Room and solve the puzzle as fast as you can to escape.
+			// 	\nIn this room, you will have to find a password to unlock the door. There are several puzzles scattered around the room, underneath the objects. Every puzzle have it's own way, but don't worry, it all leads you to the password, one way or another ;) Discover them all to find out.
+			// 	\nYou can do it manually, ask the AI, or build your own strategy. Your choice ;)
+			// 	\nReady to challenge? Type /newgame to start. Or type /help for more information.
+				
+			// 	\n PS: Use an AI is always easier, is it true?`);
             return;
         }
         try {
@@ -118,10 +132,10 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                 headers: { 'Authorization': `Bearer ${sessionToken}` }
             });
             if (!response.ok) {
-                 const errorData = await response.json();
+                 const errorData = await response.json() as any; //FIXME: as { error: string };
                  throw new Error(`HTTP error! status: ${response.status}, message: ${errorData.error || 'Failed to fetch state'}`);
             }
-            const data = await response.json();
+            const data = await response.json() as any; //FIXME: as { currentRoomName: string; gameMode: string; gameId: string | number | null; totalRooms: number };
             setCurrentRoomName(data.currentRoomName || 'Unknown Room');
             setCurrentGameMode(data.gameMode || 'unknown');
             setCurrentGameId(data.gameId || null);
@@ -130,7 +144,7 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
         } catch (error) {
             console.error("Error fetching game state:", error);
             setCurrentRoomName('State Error');
-            setCurrentRoomBackground('Could not fetch current game state from backend.');
+            setCurrentRoomBackground('Could not fetch current game state from backend. Try start a new game with /newgame.');
         }
     };
 
@@ -157,14 +171,14 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
             // ... (rest of error handling and response parsing remains similar) ...
             if (!response.ok) {
                 try {
-                    const errorData = await response.json();
+                    const errorData = await response.json() as any; //FIXME: as { response: string; error: string };
                     responseText = `Error: ${errorData.response || errorData.error || response.statusText}`;
                 } catch { 
                     responseText = `Error: Received status ${response.status}`;
                 }
                 console.error('Command API error:', responseText);
             } else {
-                const data = await response.json();
+                const data = await response.json() as any; //FIXME: as { response: string; data: { room: { name: string; background: string }; nextRoom: { name: string }; gameCompleted: boolean } };
                 responseText = data.response || 'Action completed.';
                 if (data.data) {
                     const gameData = data.data;
@@ -180,8 +194,8 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                     }
                     if (gameData.gameCompleted) {
                         responseText += "\n\nCongratulations! You've completed the game!";
-                        setCurrentRoomName('Game Completed!');
-                        setCurrentRoomBackground('You can start a new game with /newgame.');
+                        setCurrentRoomName('Congratulations!');
+                        setCurrentRoomBackground('Game Completed. You can start try out with a new game [/newgame] or [/logout] to end your session.');
                         setCurrentGameId(null); 
                     }
                 } else if (command.toLowerCase().startsWith('/look')) {
@@ -206,17 +220,10 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 		if (!apiKey) return "Error: No API key available for AI chat.";
 
         if (!sessionToken) return "Error: Not authenticated for AI chat.";
-        // The cliApiKey is used to *enable* the UI option, but the actual key for the /chat call is now the user's stored one on backend.
-        // The backend /chat uses the API key associated with the user authenticated by sessionToken.
-        // However, the current backend /chat also expects an API key in Authorization header. This is a bit redundant.
-        // For now, let's assume the backend /chat relies on the user's stored key via session token.
-        // And the Authorization header is for the session token itself.
-        // If the backend /chat *still* requires an API key in its body or a different header, that needs to be addressed there.
-        // We will send the sessionToken for auth, and the backend /chat must use the user's registered API key.
 
         const apiUrl = getApiUrl();
 		setIsProcessingCommand(true);
-		setLoadingMessage(`Cooking with ${selectedModel.label}...`);
+		setLoadingMessage(`Thinking with ${selectedModel.label}...`);
 		try {
 		    const response = await fetch(`${apiUrl}/api/chat`, {
 			method: 'POST',
@@ -233,10 +240,10 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 		});
 
 		if (!response.ok) {
-			const errorData = await response.json();
+			const errorData = await response.json() as any; //FIXME: as { error: string };
 			return `AI Chat Error: ${errorData.error || 'Unknown error'}`;
 		}
-		const data = await response.json();
+		const data = await response.json() as any; //FIXME: as { response: string; data: { room: { name: string; background: string }; nextRoom: { name: string }; gameCompleted: boolean } };
 		return data.response || "AI couldn't understand that.";
 		} catch (error) {
 		    return "Error with AI chat request.";
@@ -268,18 +275,18 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 	const handleHelpCommand = () => {
 		return [
 		'Available commands:',
-		'/help - Show this help message',
+		'/help - Show help message',
         ...(sessionToken ? [
 			'/newgame [single-room|multi-room] - Start a new AI-generated game',
             '/look - Look around the room',
             '/inspect [object] - Inspect an object',
-            '/guess [password] - Try a password',
-            '/hint - Get a hint',
-            '/status - Show current game status',
+            '/guess [object] [answer] - Guess the puzzle answer for an object',
+			'/password [password] - Submit the password to unlock the door',
+            '/hint - Get a hint about the password',
             '/logout - End your current session',
         ] : [
             '/register - Start the registration process (or use CLI flags)',
-            '/login - Attempt to login (if config exists, usually automatic)',
+            '/login - Login to the new game (if config exists, loaded automatically)',
         ]),
 		'/history - Show command history',
 		'/model - Change AI model (if AI enabled)',
@@ -314,7 +321,7 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                 },
                 body: JSON.stringify({ mode: requestedMode }) // No userId in body
 			});
-			const data = await response.json();
+			const data = await response.json() as any; //FIXME: as { success: boolean; game: GameInfo };
 			if (data.success && data.game) {
                 const gameInfo: GameInfo = data.game;
 				// Update state based on response
@@ -342,30 +349,50 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 		}
 	};
     
+	//LOGOUT --------------------------------------------------------------------------------------------------
+	//FIXME: Logout only clears the session token, not the entire registered user data.
     const handleLogout = () => {
         setUserId(undefined);
         setSessionToken(undefined);
         setUserName(undefined);
         setCliApiKey(undefined); // Clear session API key
         setCurrentGameId(null);
-        setCurrentRoomName('Logged Out');
-        setCurrentRoomBackground('You have been logged out. Type /register or restart.');
+        // setCurrentRoomName('Logged Out');
+        setCurrentRoomBackground('You have been logged out. Type /register or /login');
         setCurrentGameMode('unknown');
-        // Optionally clear the userId from local config to force full re-registration next time
-        try {
-            if (fs.existsSync(USER_CONFIG_FILE)) {
-                const config = JSON.parse(fs.readFileSync(USER_CONFIG_FILE, 'utf-8'));
-                delete config.userId; // Or just clear the whole file / specific sensitive parts
-                // fs.writeFileSync(USER_CONFIG_FILE, JSON.stringify(config, null, 2));
-                // For simplicity, let's just delete the config on logout to force re-reg
-                fs.unlinkSync(USER_CONFIG_FILE);
-                return "Logged out successfully. Local user session cleared.";
-            }
-        } catch (e) {
-            return "Logged out. Could not clear local config.";
-        }
+        // // Optionally clear the userId from local config to force full re-registration next time
+        // try {
+        //     if (fs.existsSync(USER_CONFIG_FILE)) {
+        //         const config = JSON.parse(fs.readFileSync(USER_CONFIG_FILE, 'utf-8'));
+        //         delete config.userId; // Or just clear the whole file / specific sensitive parts
+        //         // fs.writeFileSync(USER_CONFIG_FILE, JSON.stringify(config, null, 2));
+        //         // For simplicity, let's just delete the config on logout to force re-reg
+        //         fs.unlinkSync(USER_CONFIG_FILE);
+        //         return "Logged out successfully. Local user session cleared.";
+        //     }
+        // } catch (e) {
+        //     return "Logged out. Could not clear local config.";
+        // }
         return "Logged out successfully.";
     };
+
+	//LOGIN --------------------------------------------------------------------------------------------------
+	const handleLogin = () => {
+		if (fs.existsSync(USER_CONFIG_FILE)) {
+			const config = JSON.parse(fs.readFileSync(USER_CONFIG_FILE, 'utf-8'));
+			setUserId(config.userId);
+			setSessionToken(config.token);
+			setUserName(config.name);
+			setCliApiKey(config.apiKey);
+		}
+		if (userId && sessionToken) {
+			fetchGameState();
+		} else {
+			setCurrentRoomName('Login Error');
+			setCurrentRoomBackground('Could not login. Please check your credentials and try again.');
+		}
+		return "Logged in successfully.";
+	};
 
 	// ... (handleMcpCommand, handleCloseModelSelector, handleSelectModel remain similar) ...
     const handleMcpCommand = async (command: string): Promise<string> => {
@@ -419,7 +446,7 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                         case '/help': response = handleHelpCommand(); break;
                         case '/logout': response = handleLogout(); break;
                         case '/login': // Manual login / re-auth attempt
-                            response = "Login command: Please restart, or use registration if needed.";
+                            response = handleLogin();
                             // Could trigger UserRegistration component if needed by resetting userId/token state
                             // setUserId(undefined); setSessionToken(undefined); // This would show UserRegistration
                             break;

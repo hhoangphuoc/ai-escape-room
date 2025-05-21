@@ -45,7 +45,7 @@ router.post('/auth', jwtAuth, (req: AuthRequest, res: Response): void => {
         return;
     }
     const { apiKeys, passwordHash, ...userData } = userFromToken;
-    console.log(`API: User authenticated: ${userData.name} (${jwtPayload.sub})`);
+    console.log(`API: User authenticated: ${userData.name} (user id: ${jwtPayload.sub})`);
     res.json({ authenticated: true, user: userData });
 });
 

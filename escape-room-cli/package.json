@@ -1,30 +1,15 @@
 {
 	"name": "@hhoangphuoc/escape-room-cli",
-	"version": "0.1.0",
-	"license": "Apache-2.0",
+	"version": "1.0.0",
+	"description": "A CLI for playing AI-generated escape room games.",
 	"bin": {
 		"escape-room-cli": "dist/cli.js"
 	},
-	"type": "module",
-	"engines": {
-		"node": ">=16"
-	},
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/hhoangphuoc/escape-room-cli.git"
-	},
-	"keywords": [
-		"escape-room",
-		"cli",
-		"ink",
-		"game"
-	],
-	"author": "Phuoc Ho",
 	"scripts": {
 		"build": "tsc",
 		"dev": "tsc --watch",
 		"start": "node dist/cli.js",
-		"test": "prettier --check . && xo && ava",
+		"test": "ink test",
 		"lint": "prettier --check . && xo",
 		"format": "prettier --check source/**/*.{js,ts,jsx,tsx} && prettier --write source/**/*.{js,ts,jsx,tsx}",
 		"prepublishOnly": "npm run build",
@@ -32,9 +17,30 @@
 		"release:build-and-publish": "npm run build && npm publish",
 		"release": "npm run release:readme && npm install && npm run release:build-and-publish"
 	},
+	"type": "module",
 	"files": [
-		"dist"
+		"dist",
+		"README.md",
+		"package.json"
 	],
+	"engines": {
+		"node": ">=18"
+	},
+	"keywords": [
+		"escape-room",
+		"cli",
+		"game"
+	],
+	"author": "Phuoc Ho <phuoc.ho@nedap.com>",
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/hhoangphuoc/ai-escape-room.git"
+	},
+	"bugs": {
+		"url": "https://github.com/hhoangphuoc/ai-escape-room/issues"
+	},
+	"homepage": "https://github.com/hhoangphuoc/ai-escape-room/tree/main/escape-room-cli#readme",
 	"publishConfig": {
 		"access": "public"
 	},
