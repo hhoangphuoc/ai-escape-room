@@ -2,6 +2,7 @@
 **/node_modules
 # Environment variables
 .env
+.cursor
 CLAUDE.md
 codex
 **/CLAUDE.local.md
