@@ -9,13 +9,15 @@ import ModelSelector from './ModelSelector.js';
 import McpClientUI from './McpClientUI.js';
 import { MODELS_COLLECTION, type ModelOption } from '../utils/constants.js';
 import { getApiUrl } from '../utils/apiConfig.js';
-import UserRegistration from './UserRegistration.js';
+import UserRegistration, { handleLogin } from './UserRegistration.js';
+
+// FOR LOGOUT ----------------------------------------------------------------------------------------
 import fs from 'fs'; // For logout config clear
 import path from 'path'; // For logout config clear
 import os from 'os'; // For logout config clear
 
 const USER_CONFIG_FILE = path.join(os.homedir(), '.escape-room-config.json'); // For logout
-
+// --------------------------------------------------------------------------------------------------
 interface TerminalProps {
 	// mode: 'standard' | 'mcp';
 	// These initial props might be less relevant if UserRegistration handles initial load
@@ -48,7 +50,6 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 	const [isLoadingGame, setIsLoadingGame] = useState(false);
 	const [isProcessingCommand, setIsProcessingCommand] = useState(false);
 	const [loadingMessage, setLoadingMessage] = useState('');
-	// const [hasAICapability, setHasAICapability] = useState<boolean>(!!initialApiKey)
 	const [hasAICapability, setHasAICapability] = useState<boolean>(false); // Determined by presence of API key in state
 	const [showModelSelector, setShowModelSelector] = useState(false);
 	const [selectedModel, setSelectedModel] = useState<ModelOption>(Object.values(MODELS_COLLECTION)[0] as ModelOption);
@@ -68,6 +69,8 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 	const [currentRoomName, setCurrentRoomName] = useState('Loading...');
 	const [currentRoomBackground, setCurrentRoomBackground] = useState('Please wait or type /help.');
     const [currentGameMode, setCurrentGameMode] = useState<'default' | 'single-custom' | 'multi-custom' | 'unknown'>('unknown');
+    const [unlockedObjects, setUnlockedObjects] = useState<Array<string>>([]);
+    const [currentRoomObjects, setCurrentRoomObjects] = useState<Array<string>>([]); //TODO: Fetch list of objects names from the backend
     const [totalRooms, setTotalRooms] = useState<number>(1);
 
 	useEffect(() => {
@@ -87,11 +90,16 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 			clearTimeout(timeoutId);
 			setIsConnected(response.ok);
             if (response.ok) {
-                if (sessionToken && userId) { // Only fetch game state if logged in
+                if (userId && sessionToken) { // Only fetch game state if logged in
                     fetchGameState();
                 } else {
-                    setCurrentRoomName('Logged In. Game Not Created');
-                    setCurrentRoomBackground('Please create a new game with /newgame. Type /help for more info.');
+					setCurrentRoomName('Instructions:');
+					setCurrentRoomBackground(`This is the beginning of everything. Explore the AI Escape Room and solve the puzzle as fast as you can to escape.
+						\nIn this room, you will have to find a password to unlock the door. There are several puzzles scattered around the room, underneath the objects. Every puzzle have it's own way, but don't worry, it all leads you to the password, one way or another ;) Discover them all to find out.
+						\nYou can do it manually, ask the AI, or build your own strategy. Your choice ;)
+						\nReady to challenge? Type /newgame to start. Or type /help for more information.
+						
+						\n PS: Use an AI is always easier, is it true?`);
                 }
             } else {
                 setCurrentRoomName('Connection Error');
@@ -105,11 +113,12 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 		}
 	};
 
-    const fetchGameState = async () => {
+    // -------------------------------------------------------------------------------------------------
+    // 								FETCH GAME STATE
+    // -------------------------------------------------------------------------------------------------
+    async function fetchGameState() {
         if (!sessionToken) {
             console.warn("fetchGameState called without a sessionToken.");
-            setCurrentRoomName('Not Logged In');
-            setCurrentRoomBackground('Please /login or /register. Type /help for more info.');
             return;
         }
         try {
@@ -118,10 +127,10 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                 headers: { 'Authorization': `Bearer ${sessionToken}` }
             });
             if (!response.ok) {
-                 const errorData = await response.json();
+                 const errorData = await response.json() as any; //FIXME: as { error: string };
                  throw new Error(`HTTP error! status: ${response.status}, message: ${errorData.error || 'Failed to fetch state'}`);
             }
-            const data = await response.json();
+            const data = await response.json() as any; //FIXME: as { currentRoomName: string; gameMode: string; gameId: string | number | null; totalRooms: number };
             setCurrentRoomName(data.currentRoomName || 'Unknown Room');
             setCurrentGameMode(data.gameMode || 'unknown');
             setCurrentGameId(data.gameId || null);
@@ -130,11 +139,14 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
         } catch (error) {
             console.error("Error fetching game state:", error);
             setCurrentRoomName('State Error');
-            setCurrentRoomBackground('Could not fetch current game state from backend.');
+            setCurrentRoomBackground('Could not fetch current game state from backend. Try start a new game with /newgame.');
         }
     };
 
-    const sendCommand = async (command: string): Promise<string> => {
+    // -------------------------------------------------------------------------------------------------
+    // 								SEND COMMAND
+    // -------------------------------------------------------------------------------------------------
+    async function sendCommand(command: string): Promise<string> {
         setIsProcessingCommand(true);
         setLoadingMessage('Processing...');
         let responseText = 'Error processing command.';
@@ -146,7 +158,7 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
         }
 
         try {
-            const response = await fetch(`${apiUrl}/api/command`, {
+            const response = await fetch(`${apiUrl}/api/game/command`, {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',
@@ -157,34 +169,44 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
             // ... (rest of error handling and response parsing remains similar) ...
             if (!response.ok) {
                 try {
-                    const errorData = await response.json();
+                    const errorData = await response.json() as any; //FIXME: as { response: string; error: string };
                     responseText = `Error: ${errorData.response || errorData.error || response.statusText}`;
                 } catch { 
                     responseText = `Error: Received status ${response.status}`;
                 }
                 console.error('Command API error:', responseText);
             } else {
-                const data = await response.json();
+                const data = await response.json() as any; //FIXME: as { response: string; data: { room: { name: string; background: string }; nextRoom: { name: string }; gameCompleted: boolean } };
                 responseText = data.response || 'Action completed.';
                 if (data.data) {
                     const gameData = data.data;
+
+                    // Update room objects
+                    if (gameData.objects) setCurrentRoomObjects(gameData.objects.map((obj: any) => obj.name));
+
+                    // Update room name and background
                     if (gameData.room) {
                         setCurrentRoomName(gameData.room.name || 'Unknown Room');
                         if(gameData.room.background) setCurrentRoomBackground(gameData.room.background);
                     }
-                    if (gameData.nextRoom && gameData.unlocked) {
+
+                    // Update room name and background if the room was escaped
+                    if (gameData.nextRoom && gameData.escaped) {
                         setCurrentRoomName(gameData.nextRoom.name || 'Next Room');
-                        setCurrentRoomBackground(`Moved to ${gameData.nextRoom.name}. Type /look.`);
+                        setCurrentRoomBackground(`Moved to ${gameData.nextRoom.name}. Type /look to look around.`);
                          // Fetch full state for the new room if backend doesn't provide all details
                         fetchGameState();
                     }
+
+                    // Update room name and background if the game was completed
                     if (gameData.gameCompleted) {
                         responseText += "\n\nCongratulations! You've completed the game!";
-                        setCurrentRoomName('Game Completed!');
-                        setCurrentRoomBackground('You can start a new game with /newgame.');
+                        setCurrentRoomName('Congratulations!');
+                        setCurrentRoomBackground('Game Completed. You can start try out with a new game [/newgame] or [/logout] to end your session.');
                         setCurrentGameId(null); 
                     }
-                } else if (command.toLowerCase().startsWith('/look')) {
+                } 
+                else if (command.toLowerCase().startsWith('/look')) {
                     fetchGameState(); 
                 }
             }
@@ -199,26 +221,21 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
         return responseText;
     };
 
-	// Process natural language input through an LLM if API key is available
-	const processNaturalLanguage = async (text: string): Promise<string> => {
+    // -------------------------------------------------------------------------------------------------
+    // 								PROCESS NATURAL LANGUAGE
+    // -------------------------------------------------------------------------------------------------
+    async function processNaturalLanguage(text: string): Promise<string> {
 
 		const apiKey = cliApiKey || process.env['OPENAI_API_KEY'] || process.env['ANTHROPIC_API_KEY'];
 		if (!apiKey) return "Error: No API key available for AI chat.";
 
         if (!sessionToken) return "Error: Not authenticated for AI chat.";
-        // The cliApiKey is used to *enable* the UI option, but the actual key for the /chat call is now the user's stored one on backend.
-        // The backend /chat uses the API key associated with the user authenticated by sessionToken.
-        // However, the current backend /chat also expects an API key in Authorization header. This is a bit redundant.
-        // For now, let's assume the backend /chat relies on the user's stored key via session token.
-        // And the Authorization header is for the session token itself.
-        // If the backend /chat *still* requires an API key in its body or a different header, that needs to be addressed there.
-        // We will send the sessionToken for auth, and the backend /chat must use the user's registered API key.
 
         const apiUrl = getApiUrl();
 		setIsProcessingCommand(true);
-		setLoadingMessage(`Cooking with ${selectedModel.label}...`);
+		setLoadingMessage(`Thinking with ${selectedModel.label}...`);
 		try {
-		    const response = await fetch(`${apiUrl}/api/chat`, {
+		    const response = await fetch(`${apiUrl}/api/game/chat`, {
 			method: 'POST',
 			headers: { 
 			    'Content-Type': 'application/json',
@@ -233,10 +250,10 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 		});
 
 		if (!response.ok) {
-			const errorData = await response.json();
+			const errorData = await response.json() as any; //FIXME: as { error: string };
 			return `AI Chat Error: ${errorData.error || 'Unknown error'}`;
 		}
-		const data = await response.json();
+		const data = await response.json() as any; //FIXME: as { response: string; data: { room: { name: string; background: string }; nextRoom: { name: string }; gameCompleted: boolean } };
 		return data.response || "AI couldn't understand that.";
 		} catch (error) {
 		    return "Error with AI chat request.";
@@ -246,40 +263,41 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 		}
 	};
 
-	// --------------------------------------------------------------------------------------------
-	// 								INITIAL LOAD
-	// --------------------------------------------------------------------------------------------
-	useEffect(() => {
-		checkBackendConnection();
-		const timer = setTimeout(() => {
-			setHistory([
-				{ type: 'response', text: 'Welcome to the AI Escape Room CLI!' },
-				...(hasAICapability ? [{ type: 'response' as const, text: 'AI assistance is available for hints and interaction.' }] : []),
-			]);
-		}, 500);
-		return () => clearTimeout(timer);
-	}, [hasAICapability]); // Rerun if AI capability changes (e.g. after registration with API key)
-
-
-	//-------------------------------------------------------------------------------------------------
+    //-------------------------------------------------------------------------------------------------
 	// 				COMMAND HELPER FUNCTION
 	//-------------------------------------------------------------------------------------------------
+    // TODO: Use this + Select Input for easier command selection
+    // const HELP_COMMANDS = [
+    //     '/help - Show help message',
+    //     '/newgame [single-room|multi-room] - Start a new AI-generated game',
+    //     '/look - Look around the room',
+    //     '/inspect [object] - Inspect an object',
+    //     '/guess [object] [answer] - Guess the puzzle answer for an object',
+    //     '/password [password] - Submit the password to unlock the door',
+    //     '/hint - Get a hint about the password',
+    //     '/logout - End your current session',
+    //     '/history - Show command history',
+    //     '/model - Change AI model (if AI enabled)',
+    //     // '/mcp - Switch to MCP client mode (NOT IMPLEMENTED YET)',
+    //     // ...(hasAICapability ? [`Current AI model: ${selectedModel.label}`] : []),
+    // ]; 
 
+    // `/help` command
 	const handleHelpCommand = () => {
 		return [
 		'Available commands:',
-		'/help - Show this help message',
+		'/help - Show help message',
         ...(sessionToken ? [
 			'/newgame [single-room|multi-room] - Start a new AI-generated game',
             '/look - Look around the room',
             '/inspect [object] - Inspect an object',
-            '/guess [password] - Try a password',
-            '/hint - Get a hint',
-            '/status - Show current game status',
+            '/guess [object] [answer] - Guess the puzzle answer for an object',
+			'/password [password] - Submit the password to unlock the door',
+            '/hint - Get a hint about the password',
             '/logout - End your current session',
         ] : [
             '/register - Start the registration process (or use CLI flags)',
-            '/login - Attempt to login (if config exists, usually automatic)',
+            '/login - Login to the new game (if config exists, loaded automatically)',
         ]),
 		'/history - Show command history',
 		'/model - Change AI model (if AI enabled)',
@@ -295,9 +313,10 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
         ]),
 		].join('\n');
 	};
+    //-------------------------------------------------------------------------------------------------
 
 	// `/newgame [mode]`
-	const handleGenerateNewGame = async (mode: string = 'single-room'): Promise<string> => {
+	async function handleGenerateNewGame(mode: string = 'single-room'): Promise<string> {
         const requestedMode = (mode === 'multi-room') ? 'multi-room' : 'single-room';
         const apiUrl = getApiUrl();
         if (!sessionToken) {
@@ -306,7 +325,7 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 		try {
 			setIsLoadingGame(true);
 			setLoadingMessage(`Preparing an AI-generated [${requestedMode}] Escape Game...`);
-			const response = await fetch(`${apiUrl}/api/newgame`, {
+			const response = await fetch(`${apiUrl}/api/game/newgame`, {
 				method: 'POST',
 				headers: { 
                     'Content-Type': 'application/json',
@@ -314,9 +333,37 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                 },
                 body: JSON.stringify({ mode: requestedMode }) // No userId in body
 			});
-			const data = await response.json();
+			const data = await response.json() as any; //FIXME: as { success: boolean; game: GameInfo };
+			
+			// Enhanced logging for debugging
+			console.log('=== CLI: api/game/newgame RESPONSE RECEIVED ===');
+			console.log(JSON.stringify(data, null, 2));
+			
 			if (data.success && data.game) {
                 const gameInfo: GameInfo = data.game;
+                
+                // Check if roomData is included in the response
+                if (data.game.roomData) {
+                    console.log('=== CLI: ROOM DATA RECEIVED ===');
+                    console.log(`Room Name: ${data.game.roomData.name}`);
+                    console.log(`Room Password: ${data.game.roomData.password}`);
+                    console.log(`Room Hint: ${data.game.roomData.hint || 'No hint available'}`);
+                    console.log(`Room Escape Status: ${data.game.roomData.escape}`);
+                    console.log(`Objects:`, data.game.roomData.objects);
+                    
+                    if (Array.isArray(data.game.roomData.objects)) {
+                        console.log(`=== CLI: OBJECTS STRUCTURE ===`);
+                        data.game.roomData.objects.forEach((obj: any, index: number) => {
+                            console.log(`Object ${index + 1}:`);
+                            console.log(`  Name: ${obj.name}`);
+                            console.log(`  Description: ${obj.description}`);
+                            console.log(`  Puzzle: ${obj.puzzle || 'NO PUZZLE'}`);
+                            console.log(`  Answer: ${obj.answer || 'NO ANSWER'}`);
+                            console.log(`  Lock: ${obj.lock}`);
+                        });
+                    }
+                }
+                
 				// Update state based on response
                 setCurrentGameId(gameInfo.id || null);
 				setCurrentRoomName(gameInfo.name || 'Untitled Room');
@@ -325,50 +372,97 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                 setTotalRooms(gameInfo.totalRooms || 1);
 
 				return `
-					New ${gameInfo.mode || 'custom'} game created!
+					New ${gameInfo.mode || 'custom'} game created successfully!
 					\nRoom ${gameInfo.currentRoom || 1}${gameInfo.totalRooms && gameInfo.totalRooms > 1 ? ` of ${gameInfo.totalRooms}` : ''}: ${gameInfo.name}
 					\n${gameInfo.background || ""}
 					\nThis room contains ${gameInfo.objectCount !== undefined ? gameInfo.objectCount : '?'} objects. Use /look to see them.
+					${data.game.roomData?.hint ? `\nHint: ${data.game.roomData.hint}` : ''}
+					\nPassword needed to escape. Use /password [your_guess] when ready!
 					`;
 			} else {
+			    console.error('=== CLI: NEWGAME FAILED ===');
+			    console.log('Response data:', data);
 				return `Failed to create new game: ${data.error || "Unknown error"}`;
 			}
 		} catch (error) {
+		    console.error('=== CLI: NEWGAME NETWORK ERROR ===');
+		    console.error(error);
 			setIsConnected(false);
 			return 'Error communicating with the server.';
 		} finally {
 			setIsLoadingGame(false);
 			setLoadingMessage('');
 		}
-	};
-    
-    const handleLogout = () => {
+	}
+
+
+    // -------------------------------------------------------------------------------------------------
+    // `/logout` command
+    async function handleLogout() {
         setUserId(undefined);
         setSessionToken(undefined);
         setUserName(undefined);
         setCliApiKey(undefined); // Clear session API key
         setCurrentGameId(null);
-        setCurrentRoomName('Logged Out');
-        setCurrentRoomBackground('You have been logged out. Type /register or restart.');
+        setCurrentRoomBackground('You have been logged out. Type /register or /login');
         setCurrentGameMode('unknown');
-        // Optionally clear the userId from local config to force full re-registration next time
-        try {
-            if (fs.existsSync(USER_CONFIG_FILE)) {
-                const config = JSON.parse(fs.readFileSync(USER_CONFIG_FILE, 'utf-8'));
-                delete config.userId; // Or just clear the whole file / specific sensitive parts
-                // fs.writeFileSync(USER_CONFIG_FILE, JSON.stringify(config, null, 2));
-                // For simplicity, let's just delete the config on logout to force re-reg
-                fs.unlinkSync(USER_CONFIG_FILE);
-                return "Logged out successfully. Local user session cleared.";
-            }
-        } catch (e) {
-            return "Logged out. Could not clear local config.";
-        }
+		setTotalRooms(0);
         return "Logged out successfully.";
-    };
+    }
 
-	// ... (handleMcpCommand, handleCloseModelSelector, handleSelectModel remain similar) ...
-    const handleMcpCommand = async (command: string): Promise<string> => {
+
+    // -------------------------------------------------------------------------------------------------
+    // `/login` command
+	async function handleCliLogin() {
+		let configUserId: string | undefined;
+		let configApiKey: string | undefined;
+		let configProvider: 'openai' | 'anthropic' = 'openai';
+		
+		if (fs.existsSync(USER_CONFIG_FILE)) {
+			const config = JSON.parse(fs.readFileSync(USER_CONFIG_FILE, 'utf-8'));
+			configUserId = config.userId;
+			setUserId(config.userId);
+			setUserName(config.name);
+			
+			// Get API key from config
+			if (config.apiKeys?.openai) {
+				configApiKey = config.apiKeys.openai;
+				configProvider = 'openai';
+			} else if (config.apiKeys?.anthropic) {
+				configApiKey = config.apiKeys.anthropic;
+				configProvider = 'anthropic';
+			}
+			setCliApiKey(configApiKey);
+		}
+		
+		if (configUserId) {
+            console.log('=== CLI: Manual login attempt ===');
+            console.log('UserId:', configUserId);
+            console.log('API Key available:', !!configApiKey);
+            console.log('Provider:', configProvider);
+            
+            const loginResponse = await handleLogin(configUserId, configApiKey, configProvider);
+            const loginData = await loginResponse.json() as any; //FIXME: as { token: string; error?: string };
+            if (loginResponse.ok && loginData.token) {
+                setSessionToken(loginData.token);
+                return "Logged in successfully.";
+            } else {
+                setCurrentRoomName('Login Error');
+                return `Login failed: ${loginData.error || 'Unknown error'}`;
+            }
+		} else {
+			setCurrentRoomName('Login Error');
+			setCurrentRoomBackground('Could not login. Please check your credentials and try again.');
+			return "Login Error: No user ID found.";
+		}
+	}
+    //-------------------------------------------------------------------------------------------------
+
+
+    // -------------------------------------------------------------------------------------------------
+    // `/mcp` command
+    //FIXME: MCP mode is not fully implemented yet.
+    async function handleMcpCommand(command: string): Promise<string> {
 		if (command === '/exit-mcp' || command === '/standard') {
 			setMcpMode(false);
 			setShowMcpClient(false);
@@ -378,22 +472,13 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 			return "MCP Help: ... TO BE IMPLEMENTED ...";
 		}
 		return `MCP command processing not fully implemented yet: ${command}`;
-	};
-    const handleCloseModelSelector = () => setShowModelSelector(false);
+    }
+    //-------------------------------------------------------------------------------------------------
 
-	// --------------------------------------------------------------------------------------------
-	// 								MODEL SELECTOR
-	// --------------------------------------------------------------------------------------------
-	const handleSelectModel = (model: ModelOption) => {
-		setSelectedModel(model);
-		setHistory(prev => [...prev, { type: 'response', text: `Model changed to ${model.label}` }]);
-	};
-
-
-	// --------------------------------------------------------------------------------------------
-	// 								MAIN COMMAND HANDLER
-	// --------------------------------------------------------------------------------------------
-	const handleCommand = async (command: string) => {
+    // -----------------------------------------------------------------------------------------------------------------------------------
+	// 								                MAIN COMMAND HANDLER
+	// -------------------------------------------------------------------------------------------------
+	async function handleCommand(command: string) {
 		if (showModelSelector) return;
 		setHistory(prev => [...prev, { type: 'command', text: command }]);
 		if (command !== '/history') setShowHistory(false);
@@ -417,27 +502,215 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                 } else {
                     switch (cmd) {
                         case '/help': response = handleHelpCommand(); break;
-                        case '/logout': response = handleLogout(); break;
-                        case '/login': // Manual login / re-auth attempt
-                            response = "Login command: Please restart, or use registration if needed.";
-                            // Could trigger UserRegistration component if needed by resetting userId/token state
-                            // setUserId(undefined); setSessionToken(undefined); // This would show UserRegistration
-                            break;
+                        case '/logout': response = await handleLogout(); break;
+                        case '/login': response = await handleCliLogin(); break;
                         case '/register':
                              response = "To register, please restart the application without a saved session, or use CLI flags.";
-                             // Or, setUserId(undefined); setSessionToken(undefined);
                              break;
                         // Protected commands below - require sessionToken
-                        case '/look': case '/seek': response = sessionToken ? await sendCommand('/look') : "Please login first."; break;
-                        case '/inspect': case '/analyse': 
-                            response = sessionToken ? (parts.length < 2 ? 'Usage: /inspect [object]' : await sendCommand(`/inspect ${parts.slice(1).join(' ')}`)) : "Please login first."; 
+                        case '/look':
+                            if (!sessionToken) {
+                                response = "You are not in a game session. Please login first.";
+                            } else {
+                                // Use the new GET /look endpoint
+                                const apiUrl = getApiUrl();
+                                try {
+                                    const lookResponse = await fetch(`${apiUrl}/api/game/look`, {
+                                        headers: { 'Authorization': `Bearer ${sessionToken}` }
+                                    });
+                                    if (lookResponse.ok) {
+                                        const data = await lookResponse.json() as any; //FIXME: as { message: string; roomName: string; objects: string[] };
+                                        
+                                        console.log('=== CLI: /look RESPONSE RECEIVED ===');
+                                        console.log(JSON.stringify(data, null, 2));
+                                        
+                                        response = data.message || `Room: ${data.roomName}\nObjects: ${data.objects.join(', ')}`;
+                                        
+                                        // Update current room name if provided
+                                        if (data.roomName) {
+                                            setCurrentRoomName(data.roomName);
+                                        }
+                                    } else {
+                                        const errorData = await lookResponse.json() as any;
+                                        console.error('=== CLI: /look ERROR ===');
+                                        console.log(JSON.stringify(errorData, null, 2));
+                                        response = errorData.error || "Failed to look around.";
+                                    }
+                                } catch (error) {
+                                    console.error('=== CLI: /look NETWORK ERROR ===');
+                                    console.error(error);
+                                    response = "Error: Could not look around.";
+                                }
+                            }
                             break;
-                        case '/guess': case '/password':
-                            response = sessionToken ? (parts.length < 2 ? 'Usage: /guess [password]' : await sendCommand(`/guess ${parts.slice(1).join(' ')}`)) : "Please login first."; 
+                        case '/inspect': 
+                            if (!sessionToken) {
+                                response = "You are not in a game session. Please login first.";
+                            } else if (parts.length < 2) {
+                                response = 'Usage: /inspect [object]';
+                            } else {
+                                // Use the new GET /inspect endpoint
+                                const objectName = parts.slice(1).join(' ');
+                                const apiUrl = getApiUrl();
+                                try {
+                                    const inspectResponse = await fetch(`${apiUrl}/api/game/inspect?object=${encodeURIComponent(objectName)}`, {
+                                        headers: { 'Authorization': `Bearer ${sessionToken}` }
+                                    });
+                                    const data = await inspectResponse.json() as any; //FIXME: as { message: string; error: string; object: any };
+                                    
+                                    console.log('=== CLI: /inspect RESPONSE RECEIVED ===');
+                                    console.log(`Object: ${objectName}`);
+                                    console.log(JSON.stringify(data, null, 2));
+                                    
+                                    if (inspectResponse.ok) {
+                                        response = data.message || `Inspecting ${objectName}...`;
+                                        
+                                        // If object data is available, show additional info
+                                        if (data.object) {
+                                            console.log('=== CLI: OBJECT DETAILS ===');
+                                            console.log(`Name: ${data.object.name}`);
+                                            console.log(`Description: ${data.object.description}`);
+                                            console.log(`Puzzle: ${data.object.puzzle || 'No puzzle info'}`);
+                                            console.log(`Answer: ${data.object.answer || 'No answer info'}`);
+                                            console.log(`Lock: ${data.object.lock}`);
+                                        }
+                                    } else {
+                                        response = data.error || `Could not inspect ${objectName}.`;
+                                    }
+                                } catch (error) {
+                                    console.error('=== CLI: /inspect NETWORK ERROR ===');
+                                    console.error(error);
+                                    response = "Error: Could not inspect object.";
+                                }
+                            }
                             break;
-                        case '/hint': response = sessionToken ? await sendCommand('/hint') : "Please login first."; break;
-                        case '/newgame': response = sessionToken ? await handleGenerateNewGame(parts[1]?.toLowerCase()) : "Please login first."; break;
-                        case '/status': response = sessionToken ? await sendCommand('/status') : "Please login first."; break;
+                        case '/guess':
+                            if (!sessionToken) {
+                                response = "You are not in a game session. Please login first.";
+                            } else if (parts.length < 3) {
+                                response = 'Usage: /guess [object] [answer]';
+                            } else {
+                                // Parse object and answer from command
+                                const objectName = parts[1] || '';
+                                const answer = parts.slice(2).join(' ');
+                                const apiUrl = getApiUrl();
+                                try {
+                                    const guessResponse = await fetch(`${apiUrl}/api/game/guess?object=${encodeURIComponent(objectName)}&answer=${encodeURIComponent(answer)}`, {
+                                        method: 'POST',
+                                        headers: { 
+                                            'Authorization': `Bearer ${sessionToken}`,
+                                            'Content-Type': 'application/json'
+                                        }
+                                    });
+                                    const data = await guessResponse.json() as any; //FIXME: as { message: string; correct: boolean };
+                                    console.log('=== CLI: /guess RESPONSE RECEIVED ===');
+                                    console.log(JSON.stringify(data, null, 2));
+
+                                    if (guessResponse.ok && data.object) {
+                                        response = data.message;
+                                        if (data.object.unlocked) {
+                                            setUnlockedObjects(prev => [...prev, data.object.name]);
+                                        }
+                                    } else {
+                                        response = data.error || "Failed to guess.";
+                                    }
+                                } catch (error) {
+                                    response = "Error: Could not process guess.";
+                                }
+                            }
+                            break;
+                        case '/password':
+                            if (!sessionToken) {
+                                response = "You are not in a game session. Please login first.";
+                            } else if (parts.length < 2) {
+                                response = 'Usage: /password [password]';
+                            } else {
+                                const password = parts.slice(1).join(' ');
+                                const apiUrl = getApiUrl();
+                                try {
+                                    const passwordResponse = await fetch(`${apiUrl}/api/game/password?password=${encodeURIComponent(password)}`, {
+                                        method: 'POST',
+                                        headers: { 
+                                            'Authorization': `Bearer ${sessionToken}`,
+                                            'Content-Type': 'application/json'
+                                        }
+                                    });
+                                    const data = await passwordResponse.json() as any; //FIXME: as { message: string; escaped: boolean; timeElapsed: number; gameCompleted: boolean };
+                                    if (data.escaped) {
+                                        response = data.message + (data.timeElapsed ? `\nTime: ${data.timeElapsed} seconds` : '');
+                                        if (data.gameCompleted) {
+                                            setCurrentRoomName('Congratulations!');
+                                            setCurrentRoomBackground('Game Completed. You can start a new game with /newgame.');
+                                            setCurrentGameId(null);
+                                        }
+                                    } else {
+                                        response = data.message || "Wrong password.";
+                                    }
+                                } catch (error) {
+                                    response = "Error: Could not check password.";
+                                }
+                            }
+                            break;
+                        case '/hint': 
+                            if (!sessionToken) {
+                                response = "You are not in a game session. Please login first.";
+                            } else {
+                                const apiUrl = getApiUrl();
+                                try {
+                                    const hintResponse = await fetch(`${apiUrl}/api/game/hint`, {
+                                        headers: { 'Authorization': `Bearer ${sessionToken}` }
+                                    });
+                                    const data = await hintResponse.json() as any; //FIXME: as { hint: string };
+                                    
+                                    console.log('=== CLI: /hint RESPONSE RECEIVED ===');
+                                    console.log(JSON.stringify(data, null, 2));
+                                    
+                                    // Ensure response is always a string
+                                    if (typeof data.hint === 'string') {
+                                        response = data.hint || "No hints available.";
+                                    } else if (data.hint) {
+                                        // If hint is an object or array, stringify it
+                                        response = JSON.stringify(data.hint, null, 2);
+                                    } else if (data.message) {
+                                        // Check if there's a message field instead
+                                        response = typeof data.message === 'string' ? data.message : JSON.stringify(data.message, null, 2);
+                                    } else {
+                                        response = "No hints available.";
+                                    }
+                                } catch (error) {
+                                    console.error('=== CLI: /hint ERROR ===');
+                                    console.error(error);
+                                    response = "Error: Could not get hint.";
+                                }
+                            }
+                            break;
+                        case '/restart':
+                            if (!sessionToken) {
+                                response = "You are not in a game session. Please login first.";
+                            } else {
+                                const apiUrl = getApiUrl();
+                                try {
+                                    const restartResponse = await fetch(`${apiUrl}/api/game/restart`, {
+                                        method: 'POST',
+                                        headers: { 
+                                            'Authorization': `Bearer ${sessionToken}`,
+                                            'Content-Type': 'application/json'
+                                        }
+                                    });
+                                    const data = await restartResponse.json() as any; //FIXME: as { success: boolean; message: string };
+                                    if (data.success) {
+                                        setCurrentGameId(null);
+                                        setCurrentRoomName('Game Restarted');
+                                        setCurrentRoomBackground('Use /newgame to start a new game.');
+                                    }
+                                    response = data.message || "Game restarted.";
+                                } catch (error) {
+                                    response = "Error: Could not restart game.";
+                                }
+                            }
+                            break;
+                        case '/newgame': response = sessionToken ? await handleGenerateNewGame(parts[1]?.toLowerCase()) : "You are not in a game session. Please login first."; break;
+                        case '/status': response = sessionToken ? await sendCommand('/status') : "You are not in a game session. Please login first."; break;
                         case '/history': setShowHistory(true); response = 'Showing command history:'; break;
                         case '/model': 
                             if (hasAICapability) { setShowModelSelector(true); response = 'Opening model selector...'; }
@@ -453,8 +726,42 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 		}
 		setHistory(prev => [...prev, { type: 'response', text: response }]);
 	};
-	// ---------------------------------------------------------------------------------------------
-	
+	// --------------------------------------------------------------------------------------------------------------------------------------------
+
+    //======================================================= GAME STATES AND HANDLERS ============================================================
+
+    // ---------------------
+    // 	INITIAL LOAD
+    // ---------------------
+	useEffect(() => {
+		checkBackendConnection();
+		const timer = setTimeout(() => {
+			setHistory([
+				{ type: 'response', text: 'Welcome to the AI Escape Room CLI!' },
+				...(hasAICapability ? [{ type: 'response' as const, text: 'AI assistance is available for hints and interaction.' }] : []),
+			]);
+		}, 500);
+		return () => clearTimeout(timer);
+	}, [hasAICapability]); // Rerun if AI capability changes (e.g. after registration with API key)
+
+
+
+    // ---------------------
+    // 	MODEL SELECTOR
+    // ---------------------
+    const handleCloseModelSelector = () => setShowModelSelector(false);
+
+	const handleSelectModel = (model: ModelOption) => {
+		setSelectedModel(model);
+		setHistory(prev => [...prev, { type: 'response', text: `Model changed to ${model.label}` }]);
+	};
+
+
+
+
+
+    // -------------------------------------------------------------------------------------------------
+    // `/register` command
 	const handleRegistrationComplete = (userData: { 
         name: string; 
         email?: string; 
@@ -472,6 +779,11 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
             checkBackendConnection(); 
         }
 	};
+
+
+    // ==========================================================================================================================
+    //                                                  UI RENDERING
+    // ==========================================================================================================================
 
 	if (!sessionToken || !userId) { // Show UserRegistration if no token or userId
 		return <UserRegistration onRegistrationComplete={handleRegistrationComplete} />;
@@ -510,6 +822,23 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 				</Box>
 			) : null}
 
+            {/* OBJECT LOCKED/UNLOCKED INDICATORS */}
+            {currentGameId && (
+                <Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="gray" paddingX={1}>
+                    <Text color="gray">Objects:</Text>
+                    <Box flexDirection="row">
+                        {currentRoomObjects.map((objectName, index) => {
+                            const isUnlocked = unlockedObjects.includes(objectName);
+                            return (
+                                <Text key={index} color={isUnlocked ? "green" : "red"}>
+                                    ● 
+                                </Text>
+                            );
+                        })}
+                    </Box>
+                </Box>
+            )}
+
 			{showModelSelector ? (
 				<ModelSelector onSelect={handleSelectModel} onClose={handleCloseModelSelector} />
 			) : showMcpClient ? (
@@ -542,7 +871,7 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 				<Box marginTop={1} borderColor="red" borderStyle="round" paddingX={1}>
 					<Text color="red">
 						<Text bold>⚠ Backend server disconnected.</Text>
-						Please ensure it's running at https://ai-escape-room-backend.vercel.app or http://localhost:3001.
+						Please ensure it's running at https://ai-escape-room-nedap.vercel.app or http://localhost:3001.
 					</Text>
 					<Text color="gray">
 						Current game: {currentGameId ? `ID: ${currentGameId}` : 'No game active'} out of {totalRooms} rooms

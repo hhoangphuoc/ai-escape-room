@@ -53,7 +53,7 @@ class MultiRoomGame {
         // Process command in current room, passing the stored API key
         const result = await this.getCurrentRoom().process(input, this.apiKey);
         // Check if room was unlocked and advance to next room if not the last
-        if (result.data?.unlocked && !result.data?.gameCompleted && this.currentRoomIndex < this.totalRooms - 1) {
+        if (result.data?.escaped && !result.data?.gameCompleted && this.currentRoomIndex < this.totalRooms - 1) {
             // Move to next room
             this.currentRoomIndex++;
             // Get information about the next room

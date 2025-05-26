@@ -33,12 +33,16 @@ export const COMMANDS: CommandCollection = {
 		usage: '/inspect [object_name]',
 	},
 	'/guess': {
-		description: 'Guess a password for the current room',
-		usage: '/guess [password]',
+		description: 'Decode a puzzle or riddle of an object',
+		usage: '/guess [object_name] [puzzle]',
 	},
 	'/hint': {
-		description: 'Get a hint for the current room',
+		description: 'Get a hint for the password of this room',
 		usage: '/hint',
+	},
+	'/password': {
+		description: 'Get the password of the current room',
+		usage: '/password [your_password]',
 	},
 	'/logout': {
 		description: 'Logout to current session and your account.',
@@ -92,6 +96,16 @@ export const MODELS_COLLECTION: ModelCollection = {
         description: 'gpt-4o-mini - OpenAI\'s affordable model, cheaper option',
         value: 'gpt-4o-mini',
     },
+	'gpt-4.1': {
+        label: 'gpt-4.1',
+        description: 'gpt-4.1 - OpenAI\'s latest model, faster and more intelligent',
+        value: 'gpt-4.1',
+    },
+	'gpt-4.1-mini': {
+        label: 'gpt-4.1-mini',
+        description: 'gpt-4.1-mini - OpenAI\'s affordable model, balancing speed and intelligence',
+        value: 'gpt-4.1-mini',
+    },
     'o4-mini': {
         label: 'o4-mini',
         description: 'o4-mini - OpenAI\'s faster reasoning model (expensive)',
@@ -102,10 +116,10 @@ export const MODELS_COLLECTION: ModelCollection = {
         description: 'o3 - OpenAI\'s reasoning model (most expensive)',
         value: 'o3',
     },
-    'gpt-4.1-mini': {
-        label: 'gpt-4.1-mini',
-        description: 'gpt-4.1-mini - OpenAI\'s affordable model, balancing speed and intelligence',
-        value: 'gpt-4.1-mini',
+	'o3-mini': {
+        label: 'o3-mini',
+        description: 'o3-mini - OpenAI\'s faster reasoning model (cheaper)',
+        value: 'o3-mini',
     }
 }
 

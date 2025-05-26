@@ -23,14 +23,33 @@ interface UserRegistrationProps {
 
 const USER_CONFIG_FILE = path.join(os.homedir(), '.escape-room-config.json');
 
-// Updated UserConfig: API keys are primarily managed by the backend now.
-// CLI stores userId, name, email for re-login attempts.
 interface UserConfig {
   name: string;
   email?: string;
   userId?: string; 
   registeredAt: string;
   apiKeys?: { anthropic?: string; openai?: string; };
+}
+
+export async function handleLogin(userId: string, apiKey?: string, provider?: 'openai' | 'anthropic') {
+  const apiUrl = getApiUrl();
+  const loginPayload: any = { userId };
+  if (apiKey && provider) {
+    loginPayload.apiKey = apiKey;
+    loginPayload.provider = provider;
+  }
+  console.log('=== CLI: Sending login request ===');
+  console.log('UserId:', userId);
+  console.log('API Key provided:', !!apiKey);
+  console.log('Provider:', provider);
+  console.log('Login payload:', loginPayload);
+  
+  const loginResponse = await fetch(`${apiUrl}/api/users/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(loginPayload)
+  });
+  return loginResponse as any;
 }
 
 const UserRegistration: React.FC<UserRegistrationProps> = ({ 
@@ -52,8 +71,6 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
       setStep('verifying');
       let proceedToManualReg = true;
 
-      // Define these helper variables at a scope accessible by the whole effect if needed later
-      // For now, their main use is within the initial config load and manual step determination.
       let initialName = username; // Start with prop
       let initialEmail = email;   // Start with prop
 
@@ -69,28 +86,36 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
 
           const configApiKeyOpenAI = loadedConfig.apiKeys?.openai;
           const configApiKeyAnthropic = loadedConfig.apiKeys?.anthropic;
+          let loginApiKey: string | undefined;
+          let loginProvider: 'openai' | 'anthropic' = 'openai';
+          
           if (configApiKeyOpenAI) {
             setCurrentCliApiKey(configApiKeyOpenAI);
             setCurrentApiKeyProvider('openai');
+            loginApiKey = configApiKeyOpenAI;
+            loginProvider = 'openai';
           } else if (configApiKeyAnthropic) {
             setCurrentCliApiKey(configApiKeyAnthropic);
             setCurrentApiKeyProvider('anthropic');
+            loginApiKey = configApiKeyAnthropic;
+            loginProvider = 'anthropic';
           }
 
+          //LOGIN INSTEAD OF REGISTER --------------------------------------------------------------------------------------------------
           if (loadedConfig.userId && initialName) { // Ensure name is also present
-            const apiUrl = getApiUrl();
-            const loginResponse = await fetch(`${apiUrl}/api/users/login`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ userId: loadedConfig.userId }),
-            });
-            const loginData = await loginResponse.json();
+            // Pass API key and provider to login if available
+            const loginResponse = await handleLogin(
+              loadedConfig.userId, 
+              loginApiKey, 
+              loginProvider
+            );
+            const loginData = await loginResponse.json() as any; //FIXME: as { token: string; error?: string };
 
             if (loginResponse.ok && loginData.token) {
               setMessage('Welcome back! Session restored.');
               setStep('complete');
-              const sessionApiKey = currentCliApiKey || process.env['OPENAI_API_KEY'] || process.env['ANTHROPIC_API_KEY'];
-              const sessionProvider = currentCliApiKey ? currentApiKeyProvider : (process.env['OPENAI_API_KEY'] ? 'openai' : 'anthropic');
+              const sessionApiKey = loginApiKey || process.env['OPENAI_API_KEY'] || process.env['ANTHROPIC_API_KEY'];
+              const sessionProvider = loginApiKey ? loginProvider : (process.env['OPENAI_API_KEY'] ? 'openai' : 'anthropic');
               
               onRegistrationComplete({ 
                 name: initialName, 
@@ -105,11 +130,14 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
               setMessage(`Login attempt failed: ${loginData.error || 'Could not restore session.'}. Please verify details or register.`);
             }
           }
+          // ------------------------------------------------------------------------------------------------------------------------------
         }
       } catch (error) {
         setMessage('Could not load config or login. Please register.');
       }
+      
 
+      // FALLBACK TO MANUAL REGISTRATION --------------------------------------------------------------------------------------------------
       if (proceedToManualReg) {
         if (!currentCliApiKey) { // If no API key from config, check ENV
             const openaiEnvKey = process.env['OPENAI_API_KEY'];
@@ -170,7 +198,7 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(registrationPayload)
       });
-      const data = await response.json();
+      const data = await response.json() as any; //FIXME: as { userId: string; token: string; error?: string };
       if (response.ok && data.userId && data.token) {
         receivedUserId = data.userId;
         receivedToken = data.token;
@@ -250,15 +278,9 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
     return (
       <Box flexDirection="column" padding={1}>
         <Text bold color="cyan">Your AI API Key (OpenAI or Anthropic):</Text>
-        <Text color="gray">This will be stored in {USER_CONFIG_FILE}</Text>
         <Box marginTop={1} flexDirection="row" alignItems="center">
             <Text color="cyan">Current AI Provider: </Text>
             <Text> [{currentApiKeyProvider.toUpperCase()}] </Text>
-            {/* <SelectInput items={[{ label: 'OpenAI', value: 'openai' }, { label: 'Anthropic', value: 'anthropic' }]} onSelect={
-              (item) => {
-                setCurrentApiKeyProvider(item.value as 'openai' | 'anthropic');
-              }
-            }/> */}
         </Box>
         <Box>
           <Text color="cyan">API Key: </Text>
@@ -272,7 +294,7 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
           />
         </Box>
         <Box marginTop={1}>
-          {currentCliApiKey && <Text color="gray">Your key will be registered & stored locally.</Text>}
+          {currentCliApiKey && <Text color="gray">Your key will be registered & stored locally in {USER_CONFIG_FILE}</Text>}
         </Box>
         <Box marginTop={1}>
           <Text color="cyan">Press Enter to register and save.</Text>

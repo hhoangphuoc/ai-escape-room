@@ -48,7 +48,7 @@ class MultiRoomAgent {
                 messages: [
                     {
                         role: "system",
-                        content: prompts_1.MULTI_ROOM_PROMPT
+                        content: prompts_1.SYSTEM_PROMPT
                     },
                     {
                         role: "user",
@@ -163,19 +163,25 @@ class MultiRoomAgent {
                     catch (parseError) {
                         console.error(`Error parsing JSON for room ${roomNumber}:`, parseError);
                         // Add a fallback room
-                        this.roomsData.push({
+                        const fallbackData = {
                             name: `Fallback Room ${roomNumber}`,
                             sequence: roomNumber,
-                            background: `This room was created when an error occurred generating room ${roomNumber}.`,
+                            background: `This is a fallback room due to generation failure. Room ${roomNumber} of 3.`,
                             password: roomNumber === 3 ? "finalkey" : `key${roomNumber}`,
+                            hint: `The password is ${roomNumber === 3 ? "finalkey" : `key${roomNumber}`}`,
+                            escaped: false,
                             objects: [
                                 {
                                     name: "Note",
-                                    description: "A note with emergency instructions.",
+                                    description: "A note with fallback information.",
+                                    puzzle: "fallback puzzle",
+                                    answer: `key${roomNumber}`,
+                                    unlocked: false,
                                     details: [`The password to exit room ${roomNumber} is "${roomNumber === 3 ? "finalkey" : `key${roomNumber}`}".`]
                                 }
-                            ],
-                        });
+                            ]
+                        };
+                        this.roomsData.push(fallbackData);
                     }
                 }
             }
@@ -187,10 +193,15 @@ class MultiRoomAgent {
                     sequence: i + 1,
                     background: `This room was created when an error occurred.`,
                     password: i === 2 ? "finalkey" : `key${i + 1}`,
+                    hint: `The password is ${i === 2 ? "finalkey" : `key${i + 1}`}`,
+                    escaped: false,
                     objects: [
                         {
                             name: "Error Note",
                             description: "A note explaining what went wrong.",
+                            puzzle: "error puzzle",
+                            answer: i === 2 ? "finalkey" : `key${i + 1}`,
+                            unlocked: false,
                             details: [`An error occurred while generating the room. The password is "${i === 2 ? "finalkey" : `key${i + 1}`}".`]
                         }
                     ]
@@ -207,10 +218,15 @@ class MultiRoomAgent {
                 sequence: 1,
                 background: "This is a fallback room generated when the API response couldn't be parsed correctly.",
                 password: "key1",
+                hint: "The password is 'key1'",
+                escaped: false,
                 objects: [
                     {
                         name: "Error Note",
                         description: "A note explaining what went wrong.",
+                        puzzle: "fallback puzzle",
+                        answer: "key1",
+                        unlocked: false,
                         details: ["The OpenAI API response wasn't in the expected format. The password is 'key1'."]
                     }
                 ]
@@ -220,10 +236,15 @@ class MultiRoomAgent {
                 sequence: 2,
                 background: "This is the second fallback room.",
                 password: "key2",
+                hint: "The password is 'key2'",
+                escaped: false,
                 objects: [
                     {
                         name: "Error Note",
                         description: "A note explaining what went wrong.",
+                        puzzle: "fallback puzzle",
+                        answer: "key2",
+                        unlocked: false,
                         details: ["The OpenAI API response wasn't in the expected format. The password is 'key2'."]
                     }
                 ]
@@ -233,10 +254,15 @@ class MultiRoomAgent {
                 sequence: 3,
                 background: "This is the final fallback room.",
                 password: "escape",
+                hint: "The password is 'escape'",
+                escaped: false,
                 objects: [
                     {
                         name: "Error Note",
                         description: "A note explaining what went wrong.",
+                        puzzle: "fallback puzzle",
+                        answer: "escape",
+                        unlocked: false,
                         details: ["The OpenAI API response wasn't in the expected format. The password is 'escape'."]
                     }
                 ]
@@ -364,10 +390,7 @@ class MultiRoomAgent {
             return {
                 data: {
                     message: `Hint from ${obj.name}: ${clue}`,
-                    hint: {
-                        source: obj.name,
-                        content: clue
-                    }
+                    hint: clue
                 }
             };
         }
@@ -388,7 +411,7 @@ class MultiRoomAgent {
                             message: `
                 Correct! The password '${currentRoomData.password}' unlocks the door. 
                 You proceed to the next room: ${nextRoom.name} (Room ${nextRoomIndex + 1} of 3).\n\n${nextRoom.background}`,
-                            unlocked: true,
+                            escaped: true,
                             nextRoom: {
                                 id: nextRoomIndex,
                                 name: nextRoom.name,
@@ -407,7 +430,7 @@ class MultiRoomAgent {
                     return {
                         data: {
                             message: `Correct! The password '${currentRoomData.password}' unlocks the final door. Congratulations, you've completed all 3 rooms and escaped the challenge!`,
-                            unlocked: true,
+                            escaped: true,
                             gameCompleted: true,
                             room: {
                                 id: this.currentRoomIndex,

@@ -21,18 +21,22 @@ export interface RoomCommandResponse {
     object?: {                  // Specific object details
       name: string;
       description: string;
-      details: string[] | string;
+      puzzle?: string;          // Puzzle representation
+      answer?: string;          // Puzzle answer
+      unlocked?: boolean;           // Lock status
+      details?: string[] | string; // Optional details for backward compatibility
     };
-    unlocked?: boolean;         // Whether a room was unlocked
+    escaped?: boolean;         // Whether a room was escaped
     nextRoom?: {                // Next room if applicable
       id: number;
       name: string;
     };
     gameCompleted?: boolean;    // Whether game is completed
-    hint?: {                    // Hint information
-      source: string;           // Which object provided the hint
-      content: string;          // The hint content
-    };
+    hint?: string;              // Hint for the password
+    // hint?: {                    // Hint information
+    //   source: string;           // Which object provided the hint
+    //   content: string;          // The hint content
+    // };
   };
   
   // Legacy fields for backward compatibility
@@ -41,21 +45,26 @@ export interface RoomCommandResponse {
   roomId?: number;             // Room ID in a sequence
 }
 
-// Structure of a generated room
+// Structure of a generated room ==================================================================
 /**
- * The RoomAgent return a JSON object as the room data.
+ * The RoomAgent returns a JSON object as the room data matching SYSTEM_PROMPT format.
  * The JSON object has the following structure:
  * {
  *   "name": string; - Name of the room
  *   "background": string; - Background story of the room
  *   "password": string; - Password to unlock the room
+ *   "hint": string; - Password hint
  *   "objects": Array<{
  *     "name": string; - Name of the object
- *     "description": string; - Description of the object
- *     "details": string[]; - Details of the object
+ *     "description": string; - Description with puzzle representation, NOT the answer
+ *     "puzzle": string; - Puzzle representation
+ *     "answer": string; - Puzzle answer
+ *     "unlocked": boolean; - Lock status
  *   }>;
+ *   "escaped": boolean; - Escape status
  * }
  */
+//===================================================================================================
 
 export interface RoomData {
   id?: number; // Optional ID
@@ -63,14 +72,19 @@ export interface RoomData {
   name: string;
   background: string;
   password: string;
-  // Allow objects to be an array or a record
+  hint: string; // Password hint - now required to match SYSTEM_PROMPT
+  escaped: boolean; // Escape status - now required to match SYSTEM_PROMPT
+  // Allow objects to be an array or a record, but array is preferred for SYSTEM_PROMPT format
   objects: RoomObject[] | Record<string, RoomObject>;
 }
 
 export interface RoomObject {
   name: string;
-  description: string;
-  details: string[];
+  description: string; // Description with only puzzle representation, NOT the puzzle answer
+  puzzle: string; // Puzzle representation
+  answer: string; // Puzzle answer
+  unlocked: boolean; // Lock status
+  details?: string[]; // Backward compatibility - optional details field
 }
 
 export class RoomAgent {
@@ -120,7 +134,7 @@ export class RoomAgent {
           // If generating, apiKey is required
           if (!apiKey) {
               console.error(`API key required to generate data for custom RoomAgent ID: ${this.roomId}`);
-              this.setupFallbackRoom('API key missing for generation.');
+              this.setupFallbackRoom('API key missing for generation. Using the default room.');
               return this.roomData; // Return fallback
           }
           return await this.generateSingleRoomData(apiKey);
@@ -148,42 +162,91 @@ export class RoomAgent {
       if (this.sequence !== null && this.totalRooms !== null) {
         systemPrompt = `You are designing Room ${this.sequence} of a ${this.totalRooms}-room escape game. Follow the main instructions but ensure the theme/difficulty fits this sequence number. ${SYSTEM_PROMPT}`;
         userPrompt = `/generate_room_${this.sequence}_of_${this.totalRooms}`;
+        // userPrompt = `Generate a room for the escape game.`;
         console.log(`Generating Room ${this.sequence}/${this.totalRooms} (ID: ${this.roomId})`);
       } else {
         console.log(`Generating single custom room (ID: ${this.roomId})`);
       }
+      
+      console.log(`=== OpenAI Request for Room ID: ${this.roomId} ===`);
+      console.log(`System Prompt: ${systemPrompt.substring(0, 200)}...`);
+      console.log(`User Prompt: ${userPrompt}`);
+      
       const response = await openai.chat.completions.create({
-        model: 'gpt-4o',
+        model: 'gpt-4.1', // Updated to use a more reliable model
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt }
         ],
         response_format: { type: "json_object" },
-        temperature: 1,
-        max_tokens: 2048,
+        temperature: 0.7,
+        max_tokens: 10000,
       });
+      
       const content = response.choices[0]?.message?.content;
+      console.log(`=== OpenAI Response for Room ID: ${this.roomId} ===`);
+      console.log(`Raw Content: ${content}`);
+      
       if (content) {
         try {
           const generatedData = JSON.parse(content);
+          console.log(`=== Parsed JSON for Room ID: ${this.roomId} ===`);
+          console.log(JSON.stringify(generatedData, null, 2));
+          
+          // Validate SYSTEM_PROMPT format
+          const requiredFields = ['name', 'background', 'password', 'hint', 'objects', 'escape'];
+          const missingFields = requiredFields.filter(field => !(field in generatedData));
+          
+          if (missingFields.length > 0) {
+            console.error(`Generated JSON missing required fields for room ID ${this.roomId}:`, missingFields);
+            console.log('Adding default values for missing fields...');
+            
+            // Add default values for missing fields
+            if (!generatedData.hint) generatedData.hint = "Look for clues in the objects to find the password";
+            if (!generatedData.escaped) generatedData.escaped = false;
+            if (!generatedData.objects) generatedData.objects = [];
+          }
+          
+          // Validate object structure
+          if (Array.isArray(generatedData.objects)) {
+            const objectRequiredFields = ['name', 'description', 'puzzle', 'answer', 'unlocked'];
+            generatedData.objects.forEach((obj: any, index: number) => {
+              const objMissingFields = objectRequiredFields.filter(field => !(field in obj));
+              if (objMissingFields.length > 0) {
+                console.warn(`Object ${index} in room ${this.roomId} missing fields:`, objMissingFields);
+                // Add default values
+                if (!obj.puzzle) obj.puzzle = "Hidden puzzle within the description";
+                if (!obj.answer) obj.answer = "unknown";
+                if (obj.unlocked === undefined) obj.unlocked = false;
+              }
+            });
+          }
+          
+          console.log(`=== Final Validated Data for Room ID: ${this.roomId} ===`);
+          console.log(JSON.stringify(generatedData, null, 2));
+          
           if (generatedData.name && generatedData.background && generatedData.password && generatedData.objects) {
             this.roomData = { ...generatedData, id: this.roomId, sequence: this.sequence };
-            console.log(`Successfully generated room data for ID: ${this.roomId}`);
+            console.log(`✅ Successfully generated and validated room data for ID: ${this.roomId}`);
+            console.log(`Room Name: ${this.roomData.name}`);
+            console.log(`Password: ${this.roomData.password}`);
+            console.log(`Hint: ${this.roomData.hint}`);
+            console.log(`Objects Count: ${Array.isArray(this.roomData.objects) ? this.roomData.objects.length : Object.keys(this.roomData.objects).length}`);
           } else {
-            console.error('Generated JSON lacks required fields for room ID:', this.roomId);
-            this.setupFallbackRoom('Generated JSON lacks required fields.');
+            console.error('Generated JSON still lacks required fields after validation for room ID:', this.roomId);
+            this.setupFallbackRoom('Generated JSON lacks required fields even after validation.');
           }
         } catch (parseError) {
-          console.error('Error parsing JSON content for room ID:', this.roomId, parseError);
+          console.error('Error: parsing JSON content for room ID:', this.roomId, parseError);
           console.log('Content that failed to parse:', content);
           this.setupFallbackRoom('Failed to parse generated JSON.');
         }
       } else {
-        console.error('OpenAI response content is null for room ID:', this.roomId);
+        console.error('Error: OpenAI response content is null for room ID:', this.roomId);
         this.setupFallbackRoom('No content received from OpenAI.');
       }
     } catch (error) {
-      console.error('OpenAI API call failed for room ID:', this.roomId, error);
+      console.error('Error: OpenAI API call failed for room ID:', this.roomId, error);
       this.setupFallbackRoom('OpenAI API call failed.');
     }
 
@@ -199,12 +262,17 @@ export class RoomAgent {
       name: `Fallback Room ${this.sequence ?? this.roomId}`,
       background: `This is a fallback room. Reason: ${reason}. The ID is ${this.roomId}.`,
       password: "fallback123",
+      hint: "fallback hint",
+      escaped: false,
       // Ensure objects format matches RoomData (array or record)
       // Let's use array for fallback
       objects: [
         {
           name: "Fallback Note",
           description: "A note left behind due to an error.",
+          puzzle: "fallback puzzle",
+          answer: "fallback answer",
+          unlocked: false,
           details: [
             `An error occurred: ${reason}`,
             `The password is \"fallback123\"`
@@ -215,7 +283,6 @@ export class RoomAgent {
   }
 
   // Process input command for the room
-  // Now requires apiKey to potentially trigger generation
   public async process(input: string, apiKey?: string): Promise<RoomCommandResponse> {
     // Ensure room data is loaded/generated before processing commands
     // Pass the apiKey down
@@ -232,9 +299,28 @@ export class RoomAgent {
     const cmd = input.trim();
     const lc = cmd.toLowerCase();
 
-    // --- Command Handling Logic --- (Keep existing logic like /look, /inspect, /hint, /guess)
+    // -------------------------------- Command Handling Logic ------------------------------------------
+    // Available commands:
+    //  /look, /inspect, /hint, /guess, /password
     // Make sure to handle both array and record format for objects
+    // -------------------------------------------------------------------------------------------------
 
+
+
+    // 								/hint
+    // -------------------------------------------------------------------------------------------------
+    if (lc === '/hint') {
+      return { 
+          data: { 
+              message: `Hints for the password.`,
+              hint: currentRoomData.hint
+          }
+      };
+    }
+
+
+    // 								/look
+    // -------------------------------------------------------------------------------------------------
     if (lc === '/look') {
         let objectList: string;
         if (Array.isArray(currentRoomData.objects)) {
@@ -251,6 +337,9 @@ export class RoomAgent {
         };
     }
 
+
+    // 								/inspect <object>
+    // -------------------------------------------------------------------------------------------------
     if (lc.startsWith('/inspect ')) {
         const target = cmd.substring(9).trim().toLowerCase();
         let obj: RoomObject | undefined;
@@ -265,36 +354,57 @@ export class RoomAgent {
             return { data: { message: `No object named '${target}' found.` } };
         }
         const details = Array.isArray(obj.details) ? obj.details.join('\n') : obj.details;
-        return { data: { message: `${obj.name}: ${obj.description}\n\n${details}`, object: obj } };
+        return { data: { message: `${obj.name}: ${obj.description}\n\n${details}`, object: { ...obj} } };
     }
 
-    if (lc === '/hint') {
-        let objArray: RoomObject[];
-        if (Array.isArray(currentRoomData.objects)) {
-            objArray = currentRoomData.objects;
-        } else {
-            objArray = Object.values(currentRoomData.objects);
-        }
-        if (objArray.length === 0) {
-            return { data: { message: "There are no objects to get hints from." } };
-        }
-        const obj = objArray[Math.floor(Math.random() * objArray.length)];
-        let clue = "No details available for this object.";
-        if (obj.details && obj.details.length > 0) {
-             clue = obj.details[Math.floor(Math.random() * obj.details.length)];
-        }
-        return { data: { message: `Hint from ${obj.name}: ${clue}`, hint: { source: obj.name, content: clue } } };
-    }
 
+    // 								/guess <object> <puzzle>
+    // -------------------------------------------------------------------------------------------------
     if (lc.startsWith('/guess ')) {
-        const guess = cmd.substring(7).trim();
-        if (guess.toLowerCase() === currentRoomData.password.toLowerCase()) {
+        // const target = cmd.substring(6).trim().toLowerCase();
+        const [object, answer] = cmd.substring(6).trim().toLowerCase().split(' ');
+        let obj: RoomObject | undefined;
+        if (Array.isArray(currentRoomData.objects)) {
+            obj = currentRoomData.objects.find(o => o.name.toLowerCase() === object);
+        } else {
+            const key = Object.keys(currentRoomData.objects).find(k => currentRoomData.objects[k].name.toLowerCase() === object);
+            obj = key ? currentRoomData.objects[key] : undefined;
+        }
+        if (!obj) {
+            return { data: { message: `No object named '${object}' found.` } };
+        }
+
+        if (answer.toLowerCase() === obj.answer.toLowerCase()) {
+            return { 
+              data: { 
+                message: `Correct! The answer for ${obj.name}'s puzzle is: ${obj.answer}.`,
+                object: {
+                  ...obj,
+                  unlocked: true, //correct answer unlock the object
+                }
+              } 
+            };
+        } else {
+            return { 
+              data: { 
+                message: `Oops! Wrong answer. Try again.`, 
+                object: { ...obj, unlocked: false } 
+              } };
+        }
+    }
+
+
+    // 								/password <password>
+    // -------------------------------------------------------------------------------------------------
+    if (lc.startsWith('/password ')) {
+        const pass = cmd.substring(7).trim();
+        if (pass.toLowerCase() === currentRoomData.password.toLowerCase()) {
             const isLastRoom = this.sequence !== null && this.totalRooms !== null && this.sequence >= this.totalRooms;
             const message = `Correct! The password '${currentRoomData.password}' unlocks the door.` + (isLastRoom ? ` Congratulations, you've completed the final room!` : '');
             return {
                 data: {
                     message: message,
-                    unlocked: true,
+                    escaped: true, // Correct password unlock the room
                     gameCompleted: isLastRoom,
                     room: { id: this.roomId, name: currentRoomData.name, sequence: this.sequence }
                 }
@@ -305,6 +415,11 @@ export class RoomAgent {
     }
 
     // Default response for unknown commands within the room context
-    return { data: { message: `Unknown command in room: '${cmd}'. Try /look, /inspect <object>, /hint, or /guess <password>.` } };
+    return { 
+      data: { 
+        message: `Unknown command in room: '${cmd}'. \n
+        Try /look, /inspect <object>, /hint, /guess <object> <puzzle>, or /password <password>.` 
+      } 
+    };
   }
 }
