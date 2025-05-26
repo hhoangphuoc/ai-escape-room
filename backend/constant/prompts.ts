@@ -66,10 +66,10 @@ The response will be in a JSON object format:
       "description": "Object description  with only puzzle representation, NOT the puzzle answer",
       "puzzle": "Puzzle representation",
       "answer": "Puzzle answer",
-      "lock": false
+      "unlocked": false
     }
   ],
-  "escape": false
+  "escaped": false
 }
 
 # Steps

@@ -23,14 +23,33 @@ interface UserRegistrationProps {
 
 const USER_CONFIG_FILE = path.join(os.homedir(), '.escape-room-config.json');
 
-// Updated UserConfig: API keys are primarily managed by the backend now.
-// CLI stores userId, name, email for re-login attempts.
 interface UserConfig {
   name: string;
   email?: string;
   userId?: string; 
   registeredAt: string;
   apiKeys?: { anthropic?: string; openai?: string; };
+}
+
+export async function handleLogin(userId: string, apiKey?: string, provider?: 'openai' | 'anthropic') {
+  const apiUrl = getApiUrl();
+  const loginPayload: any = { userId };
+  if (apiKey && provider) {
+    loginPayload.apiKey = apiKey;
+    loginPayload.provider = provider;
+  }
+  console.log('=== CLI: Sending login request ===');
+  console.log('UserId:', userId);
+  console.log('API Key provided:', !!apiKey);
+  console.log('Provider:', provider);
+  console.log('Login payload:', loginPayload);
+  
+  const loginResponse = await fetch(`${apiUrl}/api/users/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(loginPayload)
+  });
+  return loginResponse as any;
 }
 
 const UserRegistration: React.FC<UserRegistrationProps> = ({ 
@@ -52,8 +71,6 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
       setStep('verifying');
       let proceedToManualReg = true;
 
-      // Define these helper variables at a scope accessible by the whole effect if needed later
-      // For now, their main use is within the initial config load and manual step determination.
       let initialName = username; // Start with prop
       let initialEmail = email;   // Start with prop
 
@@ -69,29 +86,36 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
 
           const configApiKeyOpenAI = loadedConfig.apiKeys?.openai;
           const configApiKeyAnthropic = loadedConfig.apiKeys?.anthropic;
+          let loginApiKey: string | undefined;
+          let loginProvider: 'openai' | 'anthropic' = 'openai';
+          
           if (configApiKeyOpenAI) {
             setCurrentCliApiKey(configApiKeyOpenAI);
             setCurrentApiKeyProvider('openai');
+            loginApiKey = configApiKeyOpenAI;
+            loginProvider = 'openai';
           } else if (configApiKeyAnthropic) {
             setCurrentCliApiKey(configApiKeyAnthropic);
             setCurrentApiKeyProvider('anthropic');
+            loginApiKey = configApiKeyAnthropic;
+            loginProvider = 'anthropic';
           }
 
           //LOGIN INSTEAD OF REGISTER --------------------------------------------------------------------------------------------------
           if (loadedConfig.userId && initialName) { // Ensure name is also present
-            const apiUrl = getApiUrl();
-            const loginResponse = await fetch(`${apiUrl}/api/users/login`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ userId: loadedConfig.userId }),
-            });
+            // Pass API key and provider to login if available
+            const loginResponse = await handleLogin(
+              loadedConfig.userId, 
+              loginApiKey, 
+              loginProvider
+            );
             const loginData = await loginResponse.json() as any; //FIXME: as { token: string; error?: string };
 
             if (loginResponse.ok && loginData.token) {
               setMessage('Welcome back! Session restored.');
               setStep('complete');
-              const sessionApiKey = currentCliApiKey || process.env['OPENAI_API_KEY'] || process.env['ANTHROPIC_API_KEY'];
-              const sessionProvider = currentCliApiKey ? currentApiKeyProvider : (process.env['OPENAI_API_KEY'] ? 'openai' : 'anthropic');
+              const sessionApiKey = loginApiKey || process.env['OPENAI_API_KEY'] || process.env['ANTHROPIC_API_KEY'];
+              const sessionProvider = loginApiKey ? loginProvider : (process.env['OPENAI_API_KEY'] ? 'openai' : 'anthropic');
               
               onRegistrationComplete({ 
                 name: initialName, 

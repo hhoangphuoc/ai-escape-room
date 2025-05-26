@@ -59,17 +59,33 @@ async function register(req, res) {
 }
 // Login a user (current implementation is more like a token refresh or get user)
 // Modify this if you implement password-based login as in the example
-function login(req, res) {
-    const { userId } = req.body; // Assuming login by existing userId for simplicity
+async function login(req, res) {
+    const { userId, apiKey, provider = 'openai' } = req.body; // Accept API key during login
+    console.log('=== BACKEND: Login request received ===');
+    console.log('UserId:', userId);
+    console.log('API Key provided:', !!apiKey);
+    console.log('Provider:', provider);
     if (!userId) {
         res.status(400).json({ error: 'userId is required for login.' });
         return;
     }
-    const user = exports.users[userId];
+    //-----------------------------------------------------------------------
+    // GET USER FROM FIREBASE AND POPULATE IN-MEMORY STORE
+    //-----------------------------------------------------------------------
+    const user = await (0, firebaseService_1.getUserFromFirebase)(userId);
     if (!user) {
-        res.status(404).json({ error: 'User not found.' });
+        res.status(404).json({ error: 'User not found. Please register instead.' });
         return;
     }
+    // CRITICAL FIX: Populate the in-memory users object for game routes
+    // This ensures that game routes can find the user after login
+    // Also restore API key if provided by CLI
+    // Note: Firebase doesn't return API keys for security, so we need to restore them from the login request
+    const userWithApiKey = {
+        ...user,
+        apiKeys: apiKey ? { [provider]: apiKey } : undefined // Don't use user.apiKeys since Firebase doesn't return them
+    };
+    exports.users[userId] = userWithApiKey;
     // If implementing password-based login, you'd check username and password here:
     // const { username, password } = req.body;
     // if (username !== mockUser.username || !bcrypt.compareSync(password, mockUser.passwordHash)) {
@@ -77,7 +93,8 @@ function login(req, res) {
     // }
     const payload = { sub: user.id, name: user.name }; // 'sub' for subject (user ID)
     const token = jsonwebtoken_1.default.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-    console.log(`API: User logged in: ${user.name} (${user.id})`);
+    console.log(`API: User logged in: ${user.name} (${user.id}) - Added to in-memory store`);
+    console.log(`API: User API keys after login:`, userWithApiKey.apiKeys);
     res.json({
         message: 'Login successful',
         userId: user.id,
@@ -86,12 +103,14 @@ function login(req, res) {
         token
     });
 }
+// /me endpoint
 async function getUserProfile(req, res) {
     // req.user is populated by jwtAuth middleware
     // The type of req.user depends on your JWT payload structure
     const jwtPayload = req.user;
     const userIdFromToken = jwtPayload.sub;
-    const user = exports.users[userIdFromToken];
+    // const user = users[userIdFromToken];
+    const user = await (0, firebaseService_1.getUserFromFirebase)(userIdFromToken);
     if (!user) {
         // This case should ideally not happen if token is valid and user exists
         res.status(404).json({ error: 'User not found based on token.' });

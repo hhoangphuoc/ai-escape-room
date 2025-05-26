@@ -30,7 +30,7 @@ router.get('/rooms', (req, res) => {
     const rooms = Object.entries(objects_1.ROOM_OBJECTS).map(([id, room]) => ({ id: parseInt(id, 10), name: room.name }));
     res.json({ rooms });
 });
-// GET /look - Look around the room
+// GET api/game/look - Look around the room (for command /look)
 router.get('/look', async (req, res) => {
     const userId = req.user.sub;
     console.log(`API: Received /look request for user ${userId}`);
@@ -56,11 +56,11 @@ router.get('/look', async (req, res) => {
         res.json(response);
     }
     catch (error) {
-        console.error(`API Error in /look for user ${userId}:`, error);
+        console.error(`[API Error] in /look for user ${userId}:`, error);
         res.status(500).json({ error: "Failed to look around the room." });
     }
 });
-// GET /inspect - Inspect an object
+// GET api/game/inspect - Inspect an object (for command /inpect <object>)
 router.get('/inspect', async (req, res) => {
     const userId = req.user.sub;
     const objectName = req.query.object;
@@ -98,11 +98,12 @@ router.get('/inspect', async (req, res) => {
         }
     }
     catch (error) {
-        console.error(`API Error in /inspect for user ${userId}:`, error);
+        console.error(`[API Error] in /inspect for user ${userId}:`, error);
         res.status(500).json({ error: `Failed to inspect object.` });
     }
 });
-// POST /guess - Guess the puzzle answer for an object
+// POST api/game/guess - Guess the puzzle answer for an object 
+// (for command /guess <object> <answer>)
 router.post('/guess', async (req, res) => {
     const userId = req.user.sub;
     const objectName = req.query.object;
@@ -110,7 +111,7 @@ router.post('/guess', async (req, res) => {
     console.log(`API: Received /guess request for object '${objectName}' with answer '${answer}' from user ${userId}`);
     if (!objectName || !answer) {
         res.status(400).json({
-            error: 'Both object name and answer are required. Usage: /guess?object=object_name&answer=puzzle_answer'
+            error: 'Both object name and answer are required. Usage: /guess <object> <answer>'
         });
         return;
     }
@@ -121,23 +122,26 @@ router.post('/guess', async (req, res) => {
     }
     const { gameInstance } = userSession;
     try {
-        // Note: RoomAgent doesn't have /solve command for individual objects
-        // This endpoint might need to be implemented differently or removed
-        // For now, we'll process it as a regular command
-        const command = `/solve ${objectName} ${answer}`;
-        const result = await gameInstance.process(command);
+        const command = `/guess ${objectName} ${answer}`;
+        const result = await gameInstance.process(command); // result = { data: { message: string, object: { ...RoomObject, lock: boolean } } }
         res.json({
-            correct: false, // RoomAgent doesn't track individual puzzle solving
             message: result.data?.message || result.response || "This command is not supported yet.",
-            unlockedObjects: [] // No object unlocking in current RoomAgent
+            object: result.data?.object || {
+                name: objectName,
+                description: "No description available.",
+                puzzle: "No puzzle available.",
+                answer: "No answer available.",
+                unlocked: result.data?.object?.unlocked || false
+            }
         });
     }
     catch (error) {
-        console.error(`API Error in /guess for user ${userId}:`, error);
+        console.error(`[API Error] in /guess for user ${userId}:`, error);
         res.status(500).json({ error: "Failed to process guess." });
     }
 });
-// POST /password - Submit the final password to escape
+// POST api/game/password - Submit the final password to escape 
+// (for command /password <password>)
 router.post('/password', async (req, res) => {
     const userId = req.user.sub;
     const password = req.query.password || req.body.password;
@@ -155,11 +159,11 @@ router.post('/password', async (req, res) => {
     }
     const { gameInstance } = userSession;
     try {
-        const command = `/guess ${password}`;
+        const command = `/password ${password}`;
         const result = await gameInstance.process(command);
         let responseData = {
-            escaped: result.data?.unlocked || false,
-            correct: result.data?.unlocked || false,
+            escaped: result.data?.escaped || false,
+            // correct: result.data?.object?.unlocked || false,
             message: result.data?.message || result.response,
             gameCompleted: result.data?.gameCompleted || false,
             timeElapsed: undefined,
@@ -177,11 +181,12 @@ router.post('/password', async (req, res) => {
         res.json(responseData);
     }
     catch (error) {
-        console.error(`API Error in /password for user ${userId}:`, error);
+        console.error(`[API Error] in /password for user ${userId}:`, error);
         res.status(500).json({ error: "Failed to process password." });
     }
 });
-// GET /hint - Get a hint for the current room
+// GET api/game/hint - Get a hint for the current room (
+// for command /hint)
 router.get('/hint', async (req, res) => {
     const userId = req.user.sub;
     console.log(`API: Received /hint request from user ${userId}`);
@@ -201,11 +206,11 @@ router.get('/hint', async (req, res) => {
         });
     }
     catch (error) {
-        console.error(`API Error in /hint for user ${userId}:`, error);
+        console.error(`[API Error] in /hint for user ${userId}:`, error);
         res.status(500).json({ error: "Failed to get hint." });
     }
 });
-// POST /restart - Restart the current game
+// POST api/game/restart - Restart the current game (for command /restart)
 router.post('/restart', async (req, res) => {
     const userId = req.user.sub;
     console.log(`API: Received /restart request from user ${userId}`);
@@ -223,47 +228,46 @@ router.post('/restart', async (req, res) => {
 });
 //---------------------------------------------------------------------------------------------------------------------------
 // POST /command - Process commands from CLI (fallback for complex commands)
-router.post('/command', async (req, res) => {
-    const { command } = req.body;
-    const userId = req.user.sub;
-    console.log(`API: Received command: '${command}' for user: ${userId}`);
-    if (!command) {
-        res.status(400).json({ response: 'Command is required.' });
-        return;
-    }
-    const user = authController_1.users[userId]; // Assuming users are accessible here
-    if (!user) {
-        res.status(401).json({ response: 'User not found or not registered.' });
-        return;
-    }
-    const userSession = userActiveGames[userId];
-    if (!userSession) {
-        res.status(404).json({ response: 'No active game found. Start a new game using /newgame.' });
-        return;
-    }
-    const { gameInstance, gameMode } = userSession;
-    try {
-        console.log(`API: Routing command to ${gameMode} game ID: ${userSession.gameId} for user ${userId}`);
-        const result = await gameInstance.process(command);
-        if (gameInstance instanceof MultiRoomGame_1.MultiRoomGame) {
-            userSession.currentRoomSequence = gameInstance.getCurrentRoomNumber();
-            userSession.totalRooms = gameInstance.getTotalRooms();
-            const currentRoomData = gameInstance.getCurrentRoom().getRoomData();
-            userSession.currentRoomName = currentRoomData?.name || 'Unknown Room';
-        }
-        else if (gameInstance instanceof RoomAgent_1.RoomAgent) {
-            userSession.currentRoomSequence = 1;
-            userSession.totalRooms = 1;
-            const roomData = gameInstance.getRoomData();
-            userSession.currentRoomName = roomData?.name || 'Unknown Room';
-        }
-        res.json({ response: result.data?.message || result.response || 'Action processed.', data: result.data });
-    }
-    catch (error) {
-        console.error(`Error processing command in ${gameMode} game ${userSession.gameId} for user ${userId}:`, error);
-        res.status(500).json({ response: `Error processing command in ${gameMode} game.` });
-    }
-});
+// router.post('/command', async (req: AuthRequest, res: Response): Promise<void> => {
+//     const { command } = req.body;
+//     const userId = (req.user as UserJwtPayload).sub;
+//     console.log(`API: Received command: '${command}' for user: ${userId}`);
+//     if (!command) {
+//         res.status(400).json({ response: 'Command is required.' });
+//         return;
+//     }
+//     const user = users[userId]; // Assuming users are accessible here
+//     if (!user) {
+//         res.status(401).json({ response: 'User not found or not registered.' });
+//         return;
+//     }
+//     const userSession = userActiveGames[userId];
+//     if (!userSession) {
+//         res.status(404).json({ response: 'No active game found. Start a new game using /newgame.' });
+//         return;
+//     }
+//     const { gameInstance, gameMode } = userSession;
+//     try {
+//         console.log(`API: Routing command to ${gameMode} game ID: ${userSession.gameId} for user ${userId}`);
+//         const result: RoomCommandResponse = await gameInstance.process(command);
+//         if (gameInstance instanceof MultiRoomGame) {
+//             userSession.currentRoomSequence = gameInstance.getCurrentRoomNumber();
+//             userSession.totalRooms = gameInstance.getTotalRooms();
+//             const currentRoomData = gameInstance.getCurrentRoom().getRoomData();
+//             userSession.currentRoomName = currentRoomData?.name || 'Unknown Room';
+//         } else if (gameInstance instanceof RoomAgent) {
+//              userSession.currentRoomSequence = 1;
+//              userSession.totalRooms = 1;
+//              const roomData = gameInstance.getRoomData();
+//              userSession.currentRoomName = roomData?.name || 'Unknown Room';
+//         }
+//         res.json({ response: result.data?.message || result.response || 'Action processed.', data: result.data });
+//     } catch (error) {
+//         console.error(`Error processing command in ${gameMode} game ${userSession.gameId} for user ${userId}:`, error);
+//         res.status(500).json({ response: `Error processing command in ${gameMode} game.` });
+//     }
+// });
+//---------------------------------------------------------------------------------------------------------------------------
 // POST /newgame - Create a new escape room (single or multi)
 router.post('/newgame', async (req, res) => {
     const { mode = 'single-room', roomCount, gameTheme } = req.body;
@@ -271,11 +275,14 @@ router.post('/newgame', async (req, res) => {
     console.log("API: Received /newgame request for user", userId, { body: req.body });
     const user = authController_1.users[userId];
     if (!user) {
+        console.log(`API: User ${userId} not found in in-memory store. Available users:`, Object.keys(authController_1.users));
         res.status(401).json({ success: false, error: 'User not found or not registered.' });
         return;
     }
+    console.log(`API: User ${userId} found in store. API keys:`, user.apiKeys);
     const apiKey = user.apiKeys?.openai || user.apiKeys?.anthropic;
     if (!apiKey) {
+        console.log(`API: No API key found for user ${userId}. Mode: ${mode}`);
         if (mode === 'single-custom' || mode === 'multi-custom' || mode === 'single-room' || mode === 'multi-room') {
             res.status(403).json({ success: false, error: 'User does not have a configured API key for custom game generation.' });
             return;
@@ -395,39 +402,39 @@ router.post('/newgame', async (req, res) => {
             userActiveGames[userId] = newGameSession;
             console.log(`API: New game created for user ${userId}. Mode: [${actualGameMode}] - GameID: [${newGameSession.gameId}]`);
             // Enhanced logging for JSON response debugging
-            console.log(`=== ROOM DATA GENERATED FOR ${actualGameMode.toUpperCase()} GAME ===`);
+            console.log(`=========================== ROOM DATA GENERATED FOR ${actualGameMode.toUpperCase()} GAME ===========================`);
             console.log(`Room ID: ${initialRoomData.id}`);
             console.log(`Room Name: ${initialRoomData.name}`);
             console.log(`Room Background: ${initialRoomData.background}`);
             console.log(`Room Password: ${initialRoomData.password}`);
             console.log(`Room Hint: ${initialRoomData.hint || 'NO HINT AVAILABLE'}`);
-            console.log(`Room Escape Status: ${initialRoomData.escape}`);
+            console.log(`Room Escape Status: ${initialRoomData.escaped}`);
             console.log(`Objects Count: ${Array.isArray(initialRoomData.objects) ? initialRoomData.objects.length : Object.keys(initialRoomData.objects).length}`);
             if (Array.isArray(initialRoomData.objects)) {
-                console.log(`=== OBJECTS ARRAY FORMAT ===`);
+                console.log(`================================= OBJECTS ARRAY FORMAT ======================================`);
                 initialRoomData.objects.forEach((obj, index) => {
                     console.log(`Object ${index + 1}:`);
                     console.log(`  Name: ${obj.name}`);
                     console.log(`  Description: ${obj.description.substring(0, 100)}...`);
                     console.log(`  Puzzle: ${obj.puzzle || 'NO PUZZLE'}`);
                     console.log(`  Answer: ${obj.answer || 'NO ANSWER'}`);
-                    console.log(`  Lock: ${obj.lock}`);
+                    console.log(`  Unlocked: ${obj.unlocked}`);
                     console.log(`  Details: ${obj.details ? obj.details.length + ' items' : 'NO DETAILS'}`);
                 });
             }
             else {
-                console.log(`=== OBJECTS RECORD FORMAT ===`);
+                console.log(`================================= OBJECTS RECORD FORMAT ======================================`);
                 Object.entries(initialRoomData.objects).forEach(([key, obj]) => {
                     console.log(`Object Key: ${key}`);
                     console.log(`  Name: ${obj.name}`);
                     console.log(`  Description: ${obj.description.substring(0, 100)}...`);
                     console.log(`  Puzzle: ${obj.puzzle || 'NO PUZZLE'}`);
                     console.log(`  Answer: ${obj.answer || 'NO ANSWER'}`);
-                    console.log(`  Lock: ${obj.lock}`);
+                    console.log(`  Unlocked: ${obj.unlocked}`);
                     console.log(`  Details: ${obj.details ? obj.details.length + ' items' : 'NO DETAILS'}`);
                 });
             }
-            console.log(`=== FULL ROOM DATA JSON ===`);
+            console.log(`================================= FULL ROOM DATA JSON ======================================`);
             console.log(JSON.stringify(initialRoomData, null, 2));
             const gameResponse = {
                 success: true,
@@ -446,7 +453,7 @@ router.post('/newgame', async (req, res) => {
                     roomData: initialRoomData
                 }
             };
-            console.log(`=== API RESPONSE TO CLI ===`);
+            console.log(`================================= API RESPONSE TO CLI ======================================`);
             console.log(JSON.stringify(gameResponse, null, 2));
             res.json(gameResponse);
         }
@@ -464,10 +471,10 @@ router.post('/newgame', async (req, res) => {
         });
     }
 });
-// GET /game/state - Get current game state for a user
-router.get('/game/state', async (req, res) => {
+// // GET /game/state - Get current game state for a user
+router.get('/state', async (req, res) => {
     const userId = req.user.sub;
-    console.log(`API: Received /game/state request for user ${userId}`);
+    console.log(`API: Received /state request for user ${userId}`);
     const userSession = userActiveGames[userId];
     if (!userSession) {
         res.status(404).json({ error: "No active game found." });
@@ -509,131 +516,129 @@ router.get('/game/state', async (req, res) => {
         res.status(500).json({ error: "Failed to get game state." });
     }
 });
-// GET /room/objects - List objects in the current room for a user
-router.get('/room/objects', async (req, res) => {
-    const userId = req.user.sub;
-    console.log(`API: Received /room/objects request for user ${userId}`);
-    const userSession = userActiveGames[userId];
-    if (!userSession) {
-        res.status(404).json({ error: "No active game found." });
-        return;
-    }
-    const { gameInstance } = userSession;
-    try {
-        const result = await gameInstance.process('/look');
-        const roomName = result.data?.room?.name || (gameInstance instanceof RoomAgent_1.RoomAgent ? gameInstance.getRoomData()?.name : (gameInstance instanceof MultiRoomGame_1.MultiRoomGame ? gameInstance.getCurrentRoom().getRoomData()?.name : 'Unknown Room')) || 'Unknown Room';
-        const objectNames = result.data?.objects || [];
-        res.json({ roomName: roomName, objects: objectNames });
-    }
-    catch (error) {
-        console.error(`API Error in /room/objects for user ${userId}:`, error);
-        res.status(500).json({ error: "Failed to get room objects." });
-    }
-});
-// GET /object/:object_name - Get details of a specific object for a user
-router.get('/object/:object_name', async (req, res) => {
-    const userId = req.user.sub;
-    const objectNameParam = req.params.object_name;
-    console.log(`API: Received /object/${objectNameParam} request for user ${userId}`);
-    const userSession = userActiveGames[userId];
-    if (!userSession) {
-        res.status(404).json({ error: "No active game found." });
-        return;
-    }
-    const { gameInstance } = userSession;
-    try {
-        const command = `/inspect ${objectNameParam}`;
-        const result = await gameInstance.process(command);
-        if (result.data?.object) {
-            res.status(200).json(result.data.object);
-        }
-        else {
-            res.status(404).json({ error: result.data?.message || `Object '${objectNameParam}' not found.` });
-        }
-    }
-    catch (error) {
-        console.error(`API Error in /object/${objectNameParam} for user ${userId}:`, error);
-        res.status(500).json({ error: `Failed to get object details.` });
-    }
-});
-// POST /room/unlock - Unlock a room for a user
-router.post('/room/unlock', async (req, res) => {
-    const userId = req.user.sub;
-    const { password_guess } = req.body;
-    console.log(`API: Received /room/unlock request for user ${userId}`);
-    if (typeof password_guess !== 'string') {
-        res.status(400).json({ error: 'Password guess must be a string.' });
-        return;
-    }
-    const user = authController_1.users[userId]; // Ensure user exists
-    if (!user) {
-        res.status(401).json({ error: 'User not found.' });
-        return;
-    }
-    const userSession = userActiveGames[userId];
-    if (!userSession) {
-        res.status(404).json({ error: "No active game found." });
-        return;
-    }
-    const { gameInstance, gameMode } = userSession;
-    try {
-        const command = `/guess ${password_guess}`;
-        const result = await gameInstance.process(command);
-        let responseData = {
-            unlocked: result.data?.unlocked || false,
-            finished: result.data?.gameCompleted || false,
-            message: result.data?.message || "Guess processed.",
-            nextRoom: result.data?.nextRoom,
-            currentRoomName: userSession.currentRoomName,
-            currentRoom: userSession.currentRoomSequence,
-            totalRooms: userSession.totalRooms
-        };
-        if (responseData.finished) {
-            console.log(`API: Game finished for user ${userId}. Cleaning up session.`);
-            delete userActiveGames[userId];
-        }
-        else if (responseData.unlocked) {
-            if (gameInstance instanceof MultiRoomGame_1.MultiRoomGame) {
-                userSession.currentRoomSequence = gameInstance.getCurrentRoomNumber();
-                userSession.totalRooms = gameInstance.getTotalRooms();
-                const currentRoomData = gameInstance.getCurrentRoom().getRoomData();
-                userSession.currentRoomName = currentRoomData?.name || 'Unknown Room';
-                responseData.currentRoomName = userSession.currentRoomName;
-                responseData.currentRoom = userSession.currentRoomSequence;
-                responseData.totalRooms = userSession.totalRooms;
-            }
-            else if (gameMode === 'default' && result.data?.nextRoom?.id) {
-                const nextDefaultRoomId = result.data.nextRoom.id;
-                const templateAgent = defaultRoomAgents[nextDefaultRoomId];
-                if (templateAgent) {
-                    const nextDefaultRoomAgent = new RoomAgent_1.RoomAgent(nextDefaultRoomId);
-                    const nextRoomData = nextDefaultRoomAgent.getRoomData();
-                    userActiveGames[userId] = {
-                        gameInstance: nextDefaultRoomAgent,
-                        gameMode: 'default',
-                        gameId: nextDefaultRoomId,
-                        currentRoomName: nextRoomData?.name || 'Next Room',
-                        currentRoomSequence: userSession.currentRoomSequence ? userSession.currentRoomSequence + 1 : nextDefaultRoomId,
-                        totalRooms: Object.keys(objects_1.ROOM_OBJECTS).length
-                    };
-                    console.log(`API: User ${userId} progressing to default room ${nextDefaultRoomId}`);
-                    responseData.currentRoomName = nextRoomData?.name;
-                    responseData.currentRoom = userActiveGames[userId].currentRoomSequence;
-                }
-                else {
-                    console.log(`API: User ${userId} finished all default rooms.`);
-                    responseData.finished = true;
-                    delete userActiveGames[userId];
-                }
-            }
-        }
-        res.status(200).json(responseData);
-    }
-    catch (error) {
-        console.error(`API Error in /room/unlock for user ${userId}:`, error);
-        res.status(500).json({ error: "Failed to process unlock attempt." });
-    }
-});
+//=========================================================================================================================
+// // GET /room/objects - List objects in the current room for a user
+// router.get('/room/objects', async (req: AuthRequest, res: Response): Promise<void> => {
+//     const userId = (req.user as UserJwtPayload).sub;
+//     console.log(`API: Received /room/objects request for user ${userId}`);
+//     const userSession = userActiveGames[userId];
+//     if (!userSession) {
+//         res.status(404).json({ error: "No active game found." });
+//         return;
+//     }
+//     const { gameInstance } = userSession;
+//     try {
+//         const result = await gameInstance.process('/look'); 
+//         const roomName = result.data?.room?.name || (
+//             gameInstance instanceof RoomAgent ? gameInstance.getRoomData()?.name : (
+//                 gameInstance instanceof MultiRoomGame ? gameInstance.getCurrentRoom().getRoomData()?.name : 'Unknown Room'
+//             )
+//         ) || 'Unknown Room';
+//         const objectNames: string[] = result.data?.objects || [];
+//         res.json({ roomName: roomName, objects: objectNames });
+//     } catch (error) {
+//         console.error(`[API Error] in /room/objects for user ${userId}:`, error);
+//         res.status(500).json({ error: "Failed to get room objects." });
+//     }
+// });
+// // GET /object/:object_name - Get details of a specific object for a user
+// router.get('/object/:object_name', async (req: AuthRequest, res: Response): Promise<void> => {
+//     const userId = (req.user as UserJwtPayload).sub;
+//     const objectNameParam = req.params.object_name;
+//     console.log(`API: Received /object/${objectNameParam} request for user ${userId}`);
+//     const userSession = userActiveGames[userId];
+//     if (!userSession) {
+//         res.status(404).json({ error: "No active game found." });
+//         return;
+//     }
+//     const { gameInstance } = userSession;
+//     try {
+//         const command = `/inspect ${objectNameParam}`;
+//         const result = await gameInstance.process(command);
+//         if (result.data?.object) {
+//             res.status(200).json(result.data.object);
+//         } else {
+//             res.status(404).json({ error: result.data?.message || `Object '${objectNameParam}' not found.` });
+//         }
+//     } catch (error) {
+//         console.error(`[API Error] in /object/${objectNameParam} for user ${userId}:`, error);
+//         res.status(500).json({ error: `Failed to get object details.` });
+//     }
+// });
+// // POST /room/unlock - Unlock a room for a user
+// router.post('/room/unlock', async (req: AuthRequest, res: Response): Promise<void> => {
+//     const userId = (req.user as UserJwtPayload).sub;
+//     const { password_guess } = req.body;
+//     console.log(`API: Received /room/unlock request for user ${userId}`);
+//     if (typeof password_guess !== 'string') {
+//         res.status(400).json({ error: 'Password guess must be a string.' });
+//         return;
+//     }
+//     const user = users[userId]; // Ensure user exists
+//     if (!user) {
+//         res.status(401).json({ error: 'User not found.' });
+//         return;
+//     }
+//     const userSession = userActiveGames[userId];
+//     if (!userSession) {
+//         res.status(404).json({ error: "No active game found." });
+//         return;
+//     }
+//     const { gameInstance, gameMode } = userSession;
+//     try {
+//         const command = `/guess ${password_guess}`;
+//         const result = await gameInstance.process(command);
+//         let responseData = {
+//             unlocked: result.data?.unlocked || false,
+//             finished: result.data?.gameCompleted || false, 
+//             message: result.data?.message || "Guess processed.",
+//             nextRoom: result.data?.nextRoom, 
+//             currentRoomName: userSession.currentRoomName, 
+//             currentRoom: userSession.currentRoomSequence,
+//             totalRooms: userSession.totalRooms
+//         };
+//         if (responseData.finished) {
+//             console.log(`API: Game finished for user ${userId}. Cleaning up session.`);
+//             delete userActiveGames[userId];
+//         } else if (responseData.unlocked) {
+//             if (gameInstance instanceof MultiRoomGame) {
+//                  userSession.currentRoomSequence = gameInstance.getCurrentRoomNumber();
+//                  userSession.totalRooms = gameInstance.getTotalRooms();
+//                  const currentRoomData = gameInstance.getCurrentRoom().getRoomData();
+//                  userSession.currentRoomName = currentRoomData?.name || 'Unknown Room';
+//                  responseData.currentRoomName = userSession.currentRoomName;
+//                  responseData.currentRoom = userSession.currentRoomSequence;
+//                  responseData.totalRooms = userSession.totalRooms;
+//             } else if (gameMode === 'default' && result.data?.nextRoom?.id) {
+//                 const nextDefaultRoomId = result.data.nextRoom.id as number;
+//                 const templateAgent = defaultRoomAgents[nextDefaultRoomId];
+//                 if (templateAgent) {
+//                     const nextDefaultRoomAgent = new RoomAgent(nextDefaultRoomId);
+//                     const nextRoomData = nextDefaultRoomAgent.getRoomData();
+//                     userActiveGames[userId] = { 
+//                         gameInstance: nextDefaultRoomAgent,
+//                         gameMode: 'default',
+//                         gameId: nextDefaultRoomId,
+//                         currentRoomName: nextRoomData?.name || 'Next Room',
+//                         currentRoomSequence: userSession.currentRoomSequence ? userSession.currentRoomSequence + 1 : nextDefaultRoomId, 
+//                         totalRooms: Object.keys(ROOM_OBJECTS).length
+//                     };
+//                     console.log(`API: User ${userId} progressing to default room ${nextDefaultRoomId}`);
+//                     responseData.currentRoomName = nextRoomData?.name;
+//                     responseData.currentRoom = userActiveGames[userId].currentRoomSequence;
+//                 } else {
+//                     console.log(`API: User ${userId} finished all default rooms.`);
+//                     responseData.finished = true; 
+//                     delete userActiveGames[userId];
+//                 }
+//             }
+//         }
+//         res.status(200).json(responseData);
+//     } catch (error) {
+//         console.error(`[API Error] in /room/unlock for user ${userId}:`, error);
+//         res.status(500).json({ error: "Failed to process unlock attempt." });
+//     }
+// });
 // POST /chat - Chat with the AI through own API Key
 router.post('/chat', async (req, res) => {
     const userId = req.user.sub;
@@ -674,10 +679,13 @@ router.post('/chat', async (req, res) => {
         const model_specs = {
             'gpt-4o': { max_completion_tokens: 10000, temperature: 0.7, top_p: 1 },
             'gpt-4o-mini': { max_completion_tokens: 10000, temperature: 0.7, top_p: 1 },
+            'gpt-4.1': { max_completion_tokens: 10000, temperature: 0.7, top_p: 1 },
+            'gpt-4.1-mini': { max_completion_tokens: 10000, temperature: 0.7, top_p: 1 },
             'o3': { reasoning_effort: "medium", store: false },
             'o3-mini': { reasoning_effort: "medium", store: false },
+            'o4-mini': { reasoning_effort: "medium", store: false },
         };
-        const currentModelSpec = model_specs[model] || { max_tokens: 150 }; // Default if model not in specs
+        const currentModelSpec = model_specs[model] || { max_completion_tokens: 150 }; // Default if model not in specs
         const systemContent = `You are an AI assistant in an escape room. Current room: ${roomContext} Objects: ${objectsContext}`;
         if (model.startsWith('gpt') || model.startsWith('o')) {
             console.log(`API: Using model: ${model}`);
@@ -717,7 +725,7 @@ router.get('/leaderboard', async (req, res) => {
         });
     }
     catch (error) {
-        console.error('API Error in /leaderboard:', error);
+        console.error(`[API Error] in /leaderboard:`, error);
         res.status(500).json({ error: "Failed to fetch leaderboard." });
     }
 });
@@ -735,7 +743,7 @@ router.get('/leaderboard/me', async (req, res) => {
         });
     }
     catch (error) {
-        console.error('API Error in /leaderboard/me:', error);
+        console.error(`[API Error] in /leaderboard/me:`, error);
         res.status(500).json({ error: "Failed to fetch user scores." });
     }
 });
@@ -777,7 +785,7 @@ router.post('/leaderboard/submit', async (req, res) => {
         }
     }
     catch (error) {
-        console.error('API Error in /leaderboard/submit:', error);
+        console.error(`[API Error] in /leaderboard/submit:`, error);
         res.status(500).json({ error: "Failed to submit score." });
     }
 });

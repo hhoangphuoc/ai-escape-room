@@ -9,7 +9,7 @@ import ModelSelector from './ModelSelector.js';
 import McpClientUI from './McpClientUI.js';
 import { MODELS_COLLECTION, type ModelOption } from '../utils/constants.js';
 import { getApiUrl } from '../utils/apiConfig.js';
-import UserRegistration from './UserRegistration.js';
+import UserRegistration, { handleLogin } from './UserRegistration.js';
 
 // FOR LOGOUT ----------------------------------------------------------------------------------------
 import fs from 'fs'; // For logout config clear
@@ -50,7 +50,6 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 	const [isLoadingGame, setIsLoadingGame] = useState(false);
 	const [isProcessingCommand, setIsProcessingCommand] = useState(false);
 	const [loadingMessage, setLoadingMessage] = useState('');
-	// const [hasAICapability, setHasAICapability] = useState<boolean>(!!initialApiKey)
 	const [hasAICapability, setHasAICapability] = useState<boolean>(false); // Determined by presence of API key in state
 	const [showModelSelector, setShowModelSelector] = useState(false);
 	const [selectedModel, setSelectedModel] = useState<ModelOption>(Object.values(MODELS_COLLECTION)[0] as ModelOption);
@@ -70,6 +69,8 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 	const [currentRoomName, setCurrentRoomName] = useState('Loading...');
 	const [currentRoomBackground, setCurrentRoomBackground] = useState('Please wait or type /help.');
     const [currentGameMode, setCurrentGameMode] = useState<'default' | 'single-custom' | 'multi-custom' | 'unknown'>('unknown');
+    const [unlockedObjects, setUnlockedObjects] = useState<Array<string>>([]);
+    const [currentRoomObjects, setCurrentRoomObjects] = useState<Array<string>>([]); //TODO: Fetch list of objects names from the backend
     const [totalRooms, setTotalRooms] = useState<number>(1);
 
 	useEffect(() => {
@@ -89,11 +90,9 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 			clearTimeout(timeoutId);
 			setIsConnected(response.ok);
             if (response.ok) {
-                if (sessionToken && userId) { // Only fetch game state if logged in
+                if (userId && sessionToken) { // Only fetch game state if logged in
                     fetchGameState();
                 } else {
-                    // setCurrentRoomName('Logged In. Game Not Created');
-                    // setCurrentRoomBackground('Please create a new game with /newgame. Type /help for more info.');
 					setCurrentRoomName('Instructions:');
 					setCurrentRoomBackground(`This is the beginning of everything. Explore the AI Escape Room and solve the puzzle as fast as you can to escape.
 						\nIn this room, you will have to find a password to unlock the door. There are several puzzles scattered around the room, underneath the objects. Every puzzle have it's own way, but don't worry, it all leads you to the password, one way or another ;) Discover them all to find out.
@@ -114,18 +113,12 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 		}
 	};
 
-    const fetchGameState = async () => {
+    // -------------------------------------------------------------------------------------------------
+    // 								FETCH GAME STATE
+    // -------------------------------------------------------------------------------------------------
+    async function fetchGameState() {
         if (!sessionToken) {
             console.warn("fetchGameState called without a sessionToken.");
-            //FIXME: ------------------------------------------------
-            // setCurrentRoomName('Instructions:');
-            // setCurrentRoomBackground(`This is the beginning of everything. Explore the AI Escape Room and solve the puzzle as fast as you can to escape.
-			// 	\nIn this room, you will have to find a password to unlock the door. There are several puzzles scattered around the room, underneath the objects. Every puzzle have it's own way, but don't worry, it all leads you to the password, one way or another ;) Discover them all to find out.
-			// 	\nYou can do it manually, ask the AI, or build your own strategy. Your choice ;)
-			// 	\nReady to challenge? Type /newgame to start. Or type /help for more information.
-				
-			// 	\n PS: Use an AI is always easier, is it true?`);
-            // ------------------------------------------------------
             return;
         }
         try {
@@ -150,7 +143,10 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
         }
     };
 
-    const sendCommand = async (command: string): Promise<string> => {
+    // -------------------------------------------------------------------------------------------------
+    // 								SEND COMMAND
+    // -------------------------------------------------------------------------------------------------
+    async function sendCommand(command: string): Promise<string> {
         setIsProcessingCommand(true);
         setLoadingMessage('Processing...');
         let responseText = 'Error processing command.';
@@ -184,23 +180,33 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                 responseText = data.response || 'Action completed.';
                 if (data.data) {
                     const gameData = data.data;
+
+                    // Update room objects
+                    if (gameData.objects) setCurrentRoomObjects(gameData.objects.map((obj: any) => obj.name));
+
+                    // Update room name and background
                     if (gameData.room) {
                         setCurrentRoomName(gameData.room.name || 'Unknown Room');
                         if(gameData.room.background) setCurrentRoomBackground(gameData.room.background);
                     }
-                    if (gameData.nextRoom && gameData.unlocked) {
+
+                    // Update room name and background if the room was escaped
+                    if (gameData.nextRoom && gameData.escaped) {
                         setCurrentRoomName(gameData.nextRoom.name || 'Next Room');
-                        setCurrentRoomBackground(`Moved to ${gameData.nextRoom.name}. Type /look.`);
+                        setCurrentRoomBackground(`Moved to ${gameData.nextRoom.name}. Type /look to look around.`);
                          // Fetch full state for the new room if backend doesn't provide all details
                         fetchGameState();
                     }
+
+                    // Update room name and background if the game was completed
                     if (gameData.gameCompleted) {
                         responseText += "\n\nCongratulations! You've completed the game!";
                         setCurrentRoomName('Congratulations!');
                         setCurrentRoomBackground('Game Completed. You can start try out with a new game [/newgame] or [/logout] to end your session.');
                         setCurrentGameId(null); 
                     }
-                } else if (command.toLowerCase().startsWith('/look')) {
+                } 
+                else if (command.toLowerCase().startsWith('/look')) {
                     fetchGameState(); 
                 }
             }
@@ -215,8 +221,10 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
         return responseText;
     };
 
-	// Process natural language input through an LLM if API key is available
-	const processNaturalLanguage = async (text: string): Promise<string> => {
+    // -------------------------------------------------------------------------------------------------
+    // 								PROCESS NATURAL LANGUAGE
+    // -------------------------------------------------------------------------------------------------
+    async function processNaturalLanguage(text: string): Promise<string> {
 
 		const apiKey = cliApiKey || process.env['OPENAI_API_KEY'] || process.env['ANTHROPIC_API_KEY'];
 		if (!apiKey) return "Error: No API key available for AI chat.";
@@ -255,25 +263,24 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 		}
 	};
 
-	// --------------------------------------------------------------------------------------------
-	// 								INITIAL LOAD
-	// --------------------------------------------------------------------------------------------
-	useEffect(() => {
-		checkBackendConnection();
-		const timer = setTimeout(() => {
-			setHistory([
-				{ type: 'response', text: 'Welcome to the AI Escape Room CLI!' },
-				...(hasAICapability ? [{ type: 'response' as const, text: 'AI assistance is available for hints and interaction.' }] : []),
-			]);
-		}, 500);
-		return () => clearTimeout(timer);
-	}, [hasAICapability]); // Rerun if AI capability changes (e.g. after registration with API key)
-
-
-	//-------------------------------------------------------------------------------------------------
+    //-------------------------------------------------------------------------------------------------
 	// 				COMMAND HELPER FUNCTION
 	//-------------------------------------------------------------------------------------------------
-
+    // TODO: Use this + Select Input for easier command selection
+    // const HELP_COMMANDS = [
+    //     '/help - Show help message',
+    //     '/newgame [single-room|multi-room] - Start a new AI-generated game',
+    //     '/look - Look around the room',
+    //     '/inspect [object] - Inspect an object',
+    //     '/guess [object] [answer] - Guess the puzzle answer for an object',
+    //     '/password [password] - Submit the password to unlock the door',
+    //     '/hint - Get a hint about the password',
+    //     '/logout - End your current session',
+    //     '/history - Show command history',
+    //     '/model - Change AI model (if AI enabled)',
+    //     // '/mcp - Switch to MCP client mode (NOT IMPLEMENTED YET)',
+    //     // ...(hasAICapability ? [`Current AI model: ${selectedModel.label}`] : []),
+    // ]; 
 
     // `/help` command
 	const handleHelpCommand = () => {
@@ -309,7 +316,7 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
     //-------------------------------------------------------------------------------------------------
 
 	// `/newgame [mode]`
-	const handleGenerateNewGame = async (mode: string = 'single-room'): Promise<string> => {
+	async function handleGenerateNewGame(mode: string = 'single-room'): Promise<string> {
         const requestedMode = (mode === 'multi-room') ? 'multi-room' : 'single-room';
         const apiUrl = getApiUrl();
         if (!sessionToken) {
@@ -386,13 +393,12 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 			setIsLoadingGame(false);
 			setLoadingMessage('');
 		}
-	};
-    //-------------------------------------------------------------------------------------------------
+	}
+
 
     // -------------------------------------------------------------------------------------------------
     // `/logout` command
-	//FIXME: Logout only clears the session token, not the entire registered user data.
-    const handleLogout = () => {
+    async function handleLogout() {
         setUserId(undefined);
         setSessionToken(undefined);
         setUserName(undefined);
@@ -402,34 +408,61 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
         setCurrentGameMode('unknown');
 		setTotalRooms(0);
         return "Logged out successfully.";
-    };
-    //-------------------------------------------------------------------------------------------------
+    }
+
 
     // -------------------------------------------------------------------------------------------------
     // `/login` command
-	const handleLogin = () => {
+	async function handleCliLogin() {
+		let configUserId: string | undefined;
+		let configApiKey: string | undefined;
+		let configProvider: 'openai' | 'anthropic' = 'openai';
+		
 		if (fs.existsSync(USER_CONFIG_FILE)) {
 			const config = JSON.parse(fs.readFileSync(USER_CONFIG_FILE, 'utf-8'));
+			configUserId = config.userId;
 			setUserId(config.userId);
-			setSessionToken(config.token);
 			setUserName(config.name);
-			setCliApiKey(config.apiKey);
+			
+			// Get API key from config
+			if (config.apiKeys?.openai) {
+				configApiKey = config.apiKeys.openai;
+				configProvider = 'openai';
+			} else if (config.apiKeys?.anthropic) {
+				configApiKey = config.apiKeys.anthropic;
+				configProvider = 'anthropic';
+			}
+			setCliApiKey(configApiKey);
 		}
-		if (userId && sessionToken) {
-			fetchGameState();
+		
+		if (configUserId) {
+            console.log('=== CLI: Manual login attempt ===');
+            console.log('UserId:', configUserId);
+            console.log('API Key available:', !!configApiKey);
+            console.log('Provider:', configProvider);
+            
+            const loginResponse = await handleLogin(configUserId, configApiKey, configProvider);
+            const loginData = await loginResponse.json() as any; //FIXME: as { token: string; error?: string };
+            if (loginResponse.ok && loginData.token) {
+                setSessionToken(loginData.token);
+                return "Logged in successfully.";
+            } else {
+                setCurrentRoomName('Login Error');
+                return `Login failed: ${loginData.error || 'Unknown error'}`;
+            }
 		} else {
 			setCurrentRoomName('Login Error');
 			setCurrentRoomBackground('Could not login. Please check your credentials and try again.');
+			return "Login Error: No user ID found.";
 		}
-		return "Logged in successfully.";
-	};
+	}
     //-------------------------------------------------------------------------------------------------
 
 
     // -------------------------------------------------------------------------------------------------
     // `/mcp` command
     //FIXME: MCP mode is not fully implemented yet.
-    const handleMcpCommand = async (command: string): Promise<string> => {
+    async function handleMcpCommand(command: string): Promise<string> {
 		if (command === '/exit-mcp' || command === '/standard') {
 			setMcpMode(false);
 			setShowMcpClient(false);
@@ -439,23 +472,13 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 			return "MCP Help: ... TO BE IMPLEMENTED ...";
 		}
 		return `MCP command processing not fully implemented yet: ${command}`;
-	};
+    }
     //-------------------------------------------------------------------------------------------------
 
-
-    // `/model` command
-    const handleCloseModelSelector = () => setShowModelSelector(false);
-
-	const handleSelectModel = (model: ModelOption) => {
-		setSelectedModel(model);
-		setHistory(prev => [...prev, { type: 'response', text: `Model changed to ${model.label}` }]);
-	};
-
-
-	// --------------------------------------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------------------------------------------------------------
 	// 								                MAIN COMMAND HANDLER
-	// --------------------------------------------------------------------------------------------------------------------------
-	const handleCommand = async (command: string) => {
+	// -------------------------------------------------------------------------------------------------
+	async function handleCommand(command: string) {
 		if (showModelSelector) return;
 		setHistory(prev => [...prev, { type: 'command', text: command }]);
 		if (command !== '/history') setShowHistory(false);
@@ -479,15 +502,15 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                 } else {
                     switch (cmd) {
                         case '/help': response = handleHelpCommand(); break;
-                        case '/logout': response = handleLogout(); break;
-                        case '/login': response = handleLogin(); break;
+                        case '/logout': response = await handleLogout(); break;
+                        case '/login': response = await handleCliLogin(); break;
                         case '/register':
                              response = "To register, please restart the application without a saved session, or use CLI flags.";
                              break;
                         // Protected commands below - require sessionToken
-                        case '/look': case '/seek': 
+                        case '/look':
                             if (!sessionToken) {
-                                response = "Please login first.";
+                                response = "You are not in a game session. Please login first.";
                             } else {
                                 // Use the new GET /look endpoint
                                 const apiUrl = getApiUrl();
@@ -520,9 +543,9 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                                 }
                             }
                             break;
-                        case '/inspect': case '/analyse': 
+                        case '/inspect': 
                             if (!sessionToken) {
-                                response = "Please login first.";
+                                response = "You are not in a game session. Please login first.";
                             } else if (parts.length < 2) {
                                 response = 'Usage: /inspect [object]';
                             } else {
@@ -563,7 +586,7 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                             break;
                         case '/guess':
                             if (!sessionToken) {
-                                response = "Please login first.";
+                                response = "You are not in a game session. Please login first.";
                             } else if (parts.length < 3) {
                                 response = 'Usage: /guess [object] [answer]';
                             } else {
@@ -580,7 +603,17 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                                         }
                                     });
                                     const data = await guessResponse.json() as any; //FIXME: as { message: string; correct: boolean };
-                                    response = data.message || (data.correct ? "Correct!" : "Wrong answer.");
+                                    console.log('=== CLI: /guess RESPONSE RECEIVED ===');
+                                    console.log(JSON.stringify(data, null, 2));
+
+                                    if (guessResponse.ok && data.object) {
+                                        response = data.message;
+                                        if (data.object.unlocked) {
+                                            setUnlockedObjects(prev => [...prev, data.object.name]);
+                                        }
+                                    } else {
+                                        response = data.error || "Failed to guess.";
+                                    }
                                 } catch (error) {
                                     response = "Error: Could not process guess.";
                                 }
@@ -588,7 +621,7 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                             break;
                         case '/password':
                             if (!sessionToken) {
-                                response = "Please login first.";
+                                response = "You are not in a game session. Please login first.";
                             } else if (parts.length < 2) {
                                 response = 'Usage: /password [password]';
                             } else {
@@ -620,7 +653,7 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                             break;
                         case '/hint': 
                             if (!sessionToken) {
-                                response = "Please login first.";
+                                response = "You are not in a game session. Please login first.";
                             } else {
                                 const apiUrl = getApiUrl();
                                 try {
@@ -653,7 +686,7 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                             break;
                         case '/restart':
                             if (!sessionToken) {
-                                response = "Please login first.";
+                                response = "You are not in a game session. Please login first.";
                             } else {
                                 const apiUrl = getApiUrl();
                                 try {
@@ -676,8 +709,8 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                                 }
                             }
                             break;
-                        case '/newgame': response = sessionToken ? await handleGenerateNewGame(parts[1]?.toLowerCase()) : "Please login first."; break;
-                        case '/status': response = sessionToken ? await sendCommand('/status') : "Please login first."; break;
+                        case '/newgame': response = sessionToken ? await handleGenerateNewGame(parts[1]?.toLowerCase()) : "You are not in a game session. Please login first."; break;
+                        case '/status': response = sessionToken ? await sendCommand('/status') : "You are not in a game session. Please login first."; break;
                         case '/history': setShowHistory(true); response = 'Showing command history:'; break;
                         case '/model': 
                             if (hasAICapability) { setShowModelSelector(true); response = 'Opening model selector...'; }
@@ -693,7 +726,38 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 		}
 		setHistory(prev => [...prev, { type: 'response', text: response }]);
 	};
-	// -------------------------------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------------------------------------------------------------
+
+    //======================================================= GAME STATES AND HANDLERS ============================================================
+
+    // ---------------------
+    // 	INITIAL LOAD
+    // ---------------------
+	useEffect(() => {
+		checkBackendConnection();
+		const timer = setTimeout(() => {
+			setHistory([
+				{ type: 'response', text: 'Welcome to the AI Escape Room CLI!' },
+				...(hasAICapability ? [{ type: 'response' as const, text: 'AI assistance is available for hints and interaction.' }] : []),
+			]);
+		}, 500);
+		return () => clearTimeout(timer);
+	}, [hasAICapability]); // Rerun if AI capability changes (e.g. after registration with API key)
+
+
+
+    // ---------------------
+    // 	MODEL SELECTOR
+    // ---------------------
+    const handleCloseModelSelector = () => setShowModelSelector(false);
+
+	const handleSelectModel = (model: ModelOption) => {
+		setSelectedModel(model);
+		setHistory(prev => [...prev, { type: 'response', text: `Model changed to ${model.label}` }]);
+	};
+
+
+
 
 
     // -------------------------------------------------------------------------------------------------
@@ -715,12 +779,11 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
             checkBackendConnection(); 
         }
 	};
-    //-------------------------------------------------------------------------------------------------
 
 
-    // --------------------------------------------------------------------------------------------------------------------------
+    // ==========================================================================================================================
     //                                                  UI RENDERING
-    // --------------------------------------------------------------------------------------------------------------------------
+    // ==========================================================================================================================
 
 	if (!sessionToken || !userId) { // Show UserRegistration if no token or userId
 		return <UserRegistration onRegistrationComplete={handleRegistrationComplete} />;
@@ -759,6 +822,23 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 				</Box>
 			) : null}
 
+            {/* OBJECT LOCKED/UNLOCKED INDICATORS */}
+            {currentGameId && (
+                <Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="gray" paddingX={1}>
+                    <Text color="gray">Objects:</Text>
+                    <Box flexDirection="row">
+                        {currentRoomObjects.map((objectName, index) => {
+                            const isUnlocked = unlockedObjects.includes(objectName);
+                            return (
+                                <Text key={index} color={isUnlocked ? "green" : "red"}>
+                                    ● 
+                                </Text>
+                            );
+                        })}
+                    </Box>
+                </Box>
+            )}
+
 			{showModelSelector ? (
 				<ModelSelector onSelect={handleSelectModel} onClose={handleCloseModelSelector} />
 			) : showMcpClient ? (
@@ -791,7 +871,7 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 				<Box marginTop={1} borderColor="red" borderStyle="round" paddingX={1}>
 					<Text color="red">
 						<Text bold>⚠ Backend server disconnected.</Text>
-						Please ensure it's running at https://ai-escape-room-backend.vercel.app or http://localhost:3001.
+						Please ensure it's running at https://ai-escape-room-nedap.vercel.app or http://localhost:3001.
 					</Text>
 					<Text color="gray">
 						Current game: {currentGameId ? `ID: ${currentGameId}` : 'No game active'} out of {totalRooms} rooms

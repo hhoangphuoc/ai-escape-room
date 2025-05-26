@@ -33,12 +33,16 @@ export const COMMANDS: CommandCollection = {
 		usage: '/inspect [object_name]',
 	},
 	'/guess': {
-		description: 'Guess a password for the current room',
-		usage: '/guess [password]',
+		description: 'Decode a puzzle or riddle of an object',
+		usage: '/guess [object_name] [puzzle]',
 	},
 	'/hint': {
-		description: 'Get a hint for the current room',
+		description: 'Get a hint for the password of this room',
 		usage: '/hint',
+	},
+	'/password': {
+		description: 'Get the password of the current room',
+		usage: '/password [your_password]',
 	},
 	'/logout': {
 		description: 'Logout to current session and your account.',

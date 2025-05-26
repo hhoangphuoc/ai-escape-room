@@ -77,8 +77,8 @@ class RoomAgent {
             let systemPrompt = prompts_1.SYSTEM_PROMPT;
             let userPrompt = prompts_1.USER_MESSAGE;
             if (this.sequence !== null && this.totalRooms !== null) {
-                // systemPrompt = `You are designing Room ${this.sequence} of a ${this.totalRooms}-room escape game. Follow the main instructions but ensure the theme/difficulty fits this sequence number. ${SYSTEM_PROMPT}`;
-                // userPrompt = `/generate_room_${this.sequence}_of_${this.totalRooms}`;
+                systemPrompt = `You are designing Room ${this.sequence} of a ${this.totalRooms}-room escape game. Follow the main instructions but ensure the theme/difficulty fits this sequence number. ${prompts_1.SYSTEM_PROMPT}`;
+                userPrompt = `/generate_room_${this.sequence}_of_${this.totalRooms}`;
                 // userPrompt = `Generate a room for the escape game.`;
                 console.log(`Generating Room ${this.sequence}/${this.totalRooms} (ID: ${this.roomId})`);
             }
@@ -115,14 +115,14 @@ class RoomAgent {
                         // Add default values for missing fields
                         if (!generatedData.hint)
                             generatedData.hint = "Look for clues in the objects to find the password";
-                        if (!generatedData.escape)
-                            generatedData.escape = false;
+                        if (!generatedData.escaped)
+                            generatedData.escaped = false;
                         if (!generatedData.objects)
                             generatedData.objects = [];
                     }
                     // Validate object structure
                     if (Array.isArray(generatedData.objects)) {
-                        const objectRequiredFields = ['name', 'description', 'puzzle', 'answer', 'lock'];
+                        const objectRequiredFields = ['name', 'description', 'puzzle', 'answer', 'unlocked'];
                         generatedData.objects.forEach((obj, index) => {
                             const objMissingFields = objectRequiredFields.filter(field => !(field in obj));
                             if (objMissingFields.length > 0) {
@@ -132,8 +132,8 @@ class RoomAgent {
                                     obj.puzzle = "Hidden puzzle within the description";
                                 if (!obj.answer)
                                     obj.answer = "unknown";
-                                if (obj.lock === undefined)
-                                    obj.lock = false;
+                                if (obj.unlocked === undefined)
+                                    obj.unlocked = false;
                             }
                         });
                     }
@@ -179,7 +179,7 @@ class RoomAgent {
             background: `This is a fallback room. Reason: ${reason}. The ID is ${this.roomId}.`,
             password: "fallback123",
             hint: "fallback hint",
-            escape: false,
+            escaped: false,
             // Ensure objects format matches RoomData (array or record)
             // Let's use array for fallback
             objects: [
@@ -188,7 +188,7 @@ class RoomAgent {
                     description: "A note left behind due to an error.",
                     puzzle: "fallback puzzle",
                     answer: "fallback answer",
-                    lock: false,
+                    unlocked: false,
                     details: [
                         `An error occurred: ${reason}`,
                         `The password is \"fallback123\"`
@@ -198,7 +198,6 @@ class RoomAgent {
         };
     }
     // Process input command for the room
-    // Now requires apiKey to potentially trigger generation
     async process(input, apiKey) {
         // Ensure room data is loaded/generated before processing commands
         // Pass the apiKey down
@@ -212,8 +211,23 @@ class RoomAgent {
         }
         const cmd = input.trim();
         const lc = cmd.toLowerCase();
-        // --- Command Handling Logic --- (Keep existing logic like /look, /inspect, /hint, /guess)
+        // -------------------------------- Command Handling Logic ------------------------------------------
+        // Available commands:
+        //  /look, /inspect, /hint, /guess, /password
         // Make sure to handle both array and record format for objects
+        // -------------------------------------------------------------------------------------------------
+        // 								/hint
+        // -------------------------------------------------------------------------------------------------
+        if (lc === '/hint') {
+            return {
+                data: {
+                    message: `Hints for the password.`,
+                    hint: currentRoomData.hint
+                }
+            };
+        }
+        // 								/look
+        // -------------------------------------------------------------------------------------------------
         if (lc === '/look') {
             let objectList;
             if (Array.isArray(currentRoomData.objects)) {
@@ -230,6 +244,8 @@ class RoomAgent {
                 }
             };
         }
+        // 								/inspect <object>
+        // -------------------------------------------------------------------------------------------------
         if (lc.startsWith('/inspect ')) {
             const target = cmd.substring(9).trim().toLowerCase();
             let obj;
@@ -244,35 +260,55 @@ class RoomAgent {
                 return { data: { message: `No object named '${target}' found.` } };
             }
             const details = Array.isArray(obj.details) ? obj.details.join('\n') : obj.details;
-            return { data: { message: `${obj.name}: ${obj.description}\n\n${details}`, object: obj } };
+            return { data: { message: `${obj.name}: ${obj.description}\n\n${details}`, object: { ...obj } } };
         }
-        if (lc === '/hint') {
-            let objArray;
+        // 								/guess <object> <puzzle>
+        // -------------------------------------------------------------------------------------------------
+        if (lc.startsWith('/guess ')) {
+            // const target = cmd.substring(6).trim().toLowerCase();
+            const [object, answer] = cmd.substring(6).trim().toLowerCase().split(' ');
+            let obj;
             if (Array.isArray(currentRoomData.objects)) {
-                objArray = currentRoomData.objects;
+                obj = currentRoomData.objects.find(o => o.name.toLowerCase() === object);
             }
             else {
-                objArray = Object.values(currentRoomData.objects);
+                const key = Object.keys(currentRoomData.objects).find(k => currentRoomData.objects[k].name.toLowerCase() === object);
+                obj = key ? currentRoomData.objects[key] : undefined;
             }
-            if (objArray.length === 0) {
-                return { data: { message: "There are no objects to get hints from." } };
+            if (!obj) {
+                return { data: { message: `No object named '${object}' found.` } };
             }
-            const obj = objArray[Math.floor(Math.random() * objArray.length)];
-            let clue = "No details available for this object.";
-            if (obj.details && obj.details.length > 0) {
-                clue = obj.details[Math.floor(Math.random() * obj.details.length)];
+            if (answer.toLowerCase() === obj.answer.toLowerCase()) {
+                return {
+                    data: {
+                        message: `Correct! The answer for ${obj.name}'s puzzle is: ${obj.answer}.`,
+                        object: {
+                            ...obj,
+                            unlocked: true, //correct answer unlock the object
+                        }
+                    }
+                };
             }
-            return { data: { message: `Hint from ${obj.name}: ${clue}`, hint: { source: obj.name, content: clue } } };
+            else {
+                return {
+                    data: {
+                        message: `Oops! Wrong answer. Try again.`,
+                        object: { ...obj, unlocked: false }
+                    }
+                };
+            }
         }
-        if (lc.startsWith('/guess ')) {
-            const guess = cmd.substring(7).trim();
-            if (guess.toLowerCase() === currentRoomData.password.toLowerCase()) {
+        // 								/password <password>
+        // -------------------------------------------------------------------------------------------------
+        if (lc.startsWith('/password ')) {
+            const pass = cmd.substring(7).trim();
+            if (pass.toLowerCase() === currentRoomData.password.toLowerCase()) {
                 const isLastRoom = this.sequence !== null && this.totalRooms !== null && this.sequence >= this.totalRooms;
                 const message = `Correct! The password '${currentRoomData.password}' unlocks the door.` + (isLastRoom ? ` Congratulations, you've completed the final room!` : '');
                 return {
                     data: {
                         message: message,
-                        unlocked: true,
+                        escaped: true, // Correct password unlock the room
                         gameCompleted: isLastRoom,
                         room: { id: this.roomId, name: currentRoomData.name, sequence: this.sequence }
                     }
@@ -283,7 +319,12 @@ class RoomAgent {
             }
         }
         // Default response for unknown commands within the room context
-        return { data: { message: `Unknown command in room: '${cmd}'. Try /look, /inspect <object>, /hint, or /guess <password>.` } };
+        return {
+            data: {
+                message: `Unknown command in room: '${cmd}'. \n
+        Try /look, /inspect <object>, /hint, /guess <object> <puzzle>, or /password <password>.`
+            }
+        };
     }
 }
 exports.RoomAgent = RoomAgent;
