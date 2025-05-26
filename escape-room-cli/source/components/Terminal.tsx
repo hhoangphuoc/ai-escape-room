@@ -162,7 +162,7 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
         }
 
         try {
-            const response = await fetch(`${apiUrl}/api/command`, {
+            const response = await fetch(`${apiUrl}/api/game/command`, {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',
@@ -227,7 +227,7 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 		setIsProcessingCommand(true);
 		setLoadingMessage(`Thinking with ${selectedModel.label}...`);
 		try {
-		    const response = await fetch(`${apiUrl}/api/chat`, {
+		    const response = await fetch(`${apiUrl}/api/game/chat`, {
 			method: 'POST',
 			headers: { 
 			    'Content-Type': 'application/json',
@@ -318,7 +318,7 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 		try {
 			setIsLoadingGame(true);
 			setLoadingMessage(`Preparing an AI-generated [${requestedMode}] Escape Game...`);
-			const response = await fetch(`${apiUrl}/api/newgame`, {
+			const response = await fetch(`${apiUrl}/api/game/newgame`, {
 				method: 'POST',
 				headers: { 
                     'Content-Type': 'application/json',
@@ -327,8 +327,36 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                 body: JSON.stringify({ mode: requestedMode }) // No userId in body
 			});
 			const data = await response.json() as any; //FIXME: as { success: boolean; game: GameInfo };
+			
+			// Enhanced logging for debugging
+			console.log('=== CLI: api/game/newgame RESPONSE RECEIVED ===');
+			console.log(JSON.stringify(data, null, 2));
+			
 			if (data.success && data.game) {
                 const gameInfo: GameInfo = data.game;
+                
+                // Check if roomData is included in the response
+                if (data.game.roomData) {
+                    console.log('=== CLI: ROOM DATA RECEIVED ===');
+                    console.log(`Room Name: ${data.game.roomData.name}`);
+                    console.log(`Room Password: ${data.game.roomData.password}`);
+                    console.log(`Room Hint: ${data.game.roomData.hint || 'No hint available'}`);
+                    console.log(`Room Escape Status: ${data.game.roomData.escape}`);
+                    console.log(`Objects:`, data.game.roomData.objects);
+                    
+                    if (Array.isArray(data.game.roomData.objects)) {
+                        console.log(`=== CLI: OBJECTS STRUCTURE ===`);
+                        data.game.roomData.objects.forEach((obj: any, index: number) => {
+                            console.log(`Object ${index + 1}:`);
+                            console.log(`  Name: ${obj.name}`);
+                            console.log(`  Description: ${obj.description}`);
+                            console.log(`  Puzzle: ${obj.puzzle || 'NO PUZZLE'}`);
+                            console.log(`  Answer: ${obj.answer || 'NO ANSWER'}`);
+                            console.log(`  Lock: ${obj.lock}`);
+                        });
+                    }
+                }
+                
 				// Update state based on response
                 setCurrentGameId(gameInfo.id || null);
 				setCurrentRoomName(gameInfo.name || 'Untitled Room');
@@ -337,15 +365,21 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                 setTotalRooms(gameInfo.totalRooms || 1);
 
 				return `
-					New ${gameInfo.mode || 'custom'} game created!
+					New ${gameInfo.mode || 'custom'} game created successfully!
 					\nRoom ${gameInfo.currentRoom || 1}${gameInfo.totalRooms && gameInfo.totalRooms > 1 ? ` of ${gameInfo.totalRooms}` : ''}: ${gameInfo.name}
 					\n${gameInfo.background || ""}
 					\nThis room contains ${gameInfo.objectCount !== undefined ? gameInfo.objectCount : '?'} objects. Use /look to see them.
+					${data.game.roomData?.hint ? `\nHint: ${data.game.roomData.hint}` : ''}
+					\nPassword needed to escape. Use /password [your_guess] when ready!
 					`;
 			} else {
+			    console.error('=== CLI: NEWGAME FAILED ===');
+			    console.log('Response data:', data);
 				return `Failed to create new game: ${data.error || "Unknown error"}`;
 			}
 		} catch (error) {
+		    console.error('=== CLI: NEWGAME NETWORK ERROR ===');
+		    console.error(error);
 			setIsConnected(false);
 			return 'Error communicating with the server.';
 		} finally {
@@ -463,11 +497,25 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                                     });
                                     if (lookResponse.ok) {
                                         const data = await lookResponse.json() as any; //FIXME: as { message: string; roomName: string; objects: string[] };
+                                        
+                                        console.log('=== CLI: /look RESPONSE RECEIVED ===');
+                                        console.log(JSON.stringify(data, null, 2));
+                                        
                                         response = data.message || `Room: ${data.roomName}\nObjects: ${data.objects.join(', ')}`;
+                                        
+                                        // Update current room name if provided
+                                        if (data.roomName) {
+                                            setCurrentRoomName(data.roomName);
+                                        }
                                     } else {
-                                        response = "Failed to look around.";
+                                        const errorData = await lookResponse.json() as any;
+                                        console.error('=== CLI: /look ERROR ===');
+                                        console.log(JSON.stringify(errorData, null, 2));
+                                        response = errorData.error || "Failed to look around.";
                                     }
                                 } catch (error) {
+                                    console.error('=== CLI: /look NETWORK ERROR ===');
+                                    console.error(error);
                                     response = "Error: Could not look around.";
                                 }
                             }
@@ -485,13 +533,30 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                                     const inspectResponse = await fetch(`${apiUrl}/api/game/inspect?object=${encodeURIComponent(objectName)}`, {
                                         headers: { 'Authorization': `Bearer ${sessionToken}` }
                                     });
-                                    const data = await inspectResponse.json() as any; //FIXME: as { message: string; error: string };
+                                    const data = await inspectResponse.json() as any; //FIXME: as { message: string; error: string; object: any };
+                                    
+                                    console.log('=== CLI: /inspect RESPONSE RECEIVED ===');
+                                    console.log(`Object: ${objectName}`);
+                                    console.log(JSON.stringify(data, null, 2));
+                                    
                                     if (inspectResponse.ok) {
                                         response = data.message || `Inspecting ${objectName}...`;
+                                        
+                                        // If object data is available, show additional info
+                                        if (data.object) {
+                                            console.log('=== CLI: OBJECT DETAILS ===');
+                                            console.log(`Name: ${data.object.name}`);
+                                            console.log(`Description: ${data.object.description}`);
+                                            console.log(`Puzzle: ${data.object.puzzle || 'No puzzle info'}`);
+                                            console.log(`Answer: ${data.object.answer || 'No answer info'}`);
+                                            console.log(`Lock: ${data.object.lock}`);
+                                        }
                                     } else {
                                         response = data.error || `Could not inspect ${objectName}.`;
                                     }
                                 } catch (error) {
+                                    console.error('=== CLI: /inspect NETWORK ERROR ===');
+                                    console.error(error);
                                     response = "Error: Could not inspect object.";
                                 }
                             }
@@ -563,8 +628,25 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                                         headers: { 'Authorization': `Bearer ${sessionToken}` }
                                     });
                                     const data = await hintResponse.json() as any; //FIXME: as { hint: string };
-                                    response = data.hint || "No hints available.";
+                                    
+                                    console.log('=== CLI: /hint RESPONSE RECEIVED ===');
+                                    console.log(JSON.stringify(data, null, 2));
+                                    
+                                    // Ensure response is always a string
+                                    if (typeof data.hint === 'string') {
+                                        response = data.hint || "No hints available.";
+                                    } else if (data.hint) {
+                                        // If hint is an object or array, stringify it
+                                        response = JSON.stringify(data.hint, null, 2);
+                                    } else if (data.message) {
+                                        // Check if there's a message field instead
+                                        response = typeof data.message === 'string' ? data.message : JSON.stringify(data.message, null, 2);
+                                    } else {
+                                        response = "No hints available.";
+                                    }
                                 } catch (error) {
+                                    console.error('=== CLI: /hint ERROR ===');
+                                    console.error(error);
                                     response = "Error: Could not get hint.";
                                 }
                             }

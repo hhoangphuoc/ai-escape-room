@@ -12,16 +12,8 @@ const apiConfig_1 = require("../constant/apiConfig");
 // Import Routers
 const userRoutes_1 = __importDefault(require("./routes/userRoutes"));
 const gameRoutes_1 = __importDefault(require("./routes/gameRoutes"));
-// Import central user store if needed, or ensure it's correctly scoped within authController
-// import { users } from '../auth/authController'; 
 // Load environment variables
 dotenv_1.default.config();
-// JWT_SECRET should be managed in auth/jwtMiddleware.ts and auth/authController.ts
-// const JWT_SECRET = process.env.JWT_SECRET || 'very-secure-and-long-secret'; 
-// The User and UserGameSession interfaces and their stores (users, userActiveGames)
-// have been moved or are expected to be within the new route/controller files.
-// Ensure they are correctly scoped and managed there (e.g., user store in authController,
-// game session store in gameRoutes or a dedicated game service).
 // --- Express App Setup ---
 const app = (0, express_1.default)();
 const port = apiConfig_1.LOCAL_API_PORT;

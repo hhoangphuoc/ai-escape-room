@@ -9,18 +9,28 @@ exports.login = login;
 exports.getUserProfile = getUserProfile;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const uuid_1 = require("uuid");
+const firebaseService_1 = require("../services/firebaseService");
 exports.users = {}; // Export for now, ideally manage via a service
 const JWT_SECRET = process.env.JWT_SECRET || 'your-very-secure-secret'; // Ensure this is consistent
 const JWT_EXPIRES_IN = '24h';
 // Register a new user
-function register(req, res) {
+async function register(req, res) {
     const { name, email, apiKey, provider = 'openai' } = req.body;
     if (!name) {
         res.status(400).json({ error: 'Name is required' });
         return;
     }
-    // Optional: Check if user already exists by email or name if they should be unique
-    // For example: if (Object.values(users).some(u => u.email === email)) { ... }
+    // Check if email already exists in Firebase
+    if (email) {
+        const emailExists = await (0, firebaseService_1.emailExistsInFirebase)(email);
+        if (emailExists) {
+            res.status(409).json({ error: 'Email already registered' });
+            return;
+        }
+    }
+    //-----------------------------------------------------------------------
+    // CREATE NEW USER
+    //-----------------------------------------------------------------------
     const userId = (0, uuid_1.v4)();
     const newUser = {
         id: userId,
@@ -31,6 +41,10 @@ function register(req, res) {
         // If using passwords, hash it here: passwordHash: bcrypt.hashSync(password, 10)
     };
     exports.users[userId] = newUser;
+    // Save to Firebase asynchronously
+    (0, firebaseService_1.saveUserToFirebase)(newUser).catch(error => {
+        console.error('Failed to save user to Firebase:', error);
+    });
     // Sign a token upon successful registration
     const payload = { sub: userId, name: name }; // 'sub' is standard for subject (user ID)
     const token = jsonwebtoken_1.default.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });

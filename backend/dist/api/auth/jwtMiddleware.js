@@ -4,8 +4,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.jwtAuth = void 0;
-// backend/api/auth/jwtMiddleware.ts
-console.log('[jwtAuth] File loaded and jwtAuth defined.');
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const JWT_SECRET = process.env.JWT_SECRET || 'your-very-secure-secret';
 const jwtAuth = (req, res, next) => {

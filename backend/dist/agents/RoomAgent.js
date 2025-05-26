@@ -54,7 +54,7 @@ class RoomAgent {
             // If generating, apiKey is required
             if (!apiKey) {
                 console.error(`API key required to generate data for custom RoomAgent ID: ${this.roomId}`);
-                this.setupFallbackRoom('API key missing for generation.');
+                this.setupFallbackRoom('API key missing for generation. Using the default room.');
                 return this.roomData; // Return fallback
             }
             return await this.generateSingleRoomData(apiKey);
@@ -77,15 +77,19 @@ class RoomAgent {
             let systemPrompt = prompts_1.SYSTEM_PROMPT;
             let userPrompt = prompts_1.USER_MESSAGE;
             if (this.sequence !== null && this.totalRooms !== null) {
-                systemPrompt = `You are designing Room ${this.sequence} of a ${this.totalRooms}-room escape game. Follow the main instructions but ensure the theme/difficulty fits this sequence number. ${prompts_1.SYSTEM_PROMPT}`;
-                userPrompt = `/generate_room_${this.sequence}_of_${this.totalRooms}`;
+                // systemPrompt = `You are designing Room ${this.sequence} of a ${this.totalRooms}-room escape game. Follow the main instructions but ensure the theme/difficulty fits this sequence number. ${SYSTEM_PROMPT}`;
+                // userPrompt = `/generate_room_${this.sequence}_of_${this.totalRooms}`;
+                // userPrompt = `Generate a room for the escape game.`;
                 console.log(`Generating Room ${this.sequence}/${this.totalRooms} (ID: ${this.roomId})`);
             }
             else {
                 console.log(`Generating single custom room (ID: ${this.roomId})`);
             }
+            console.log(`=== OpenAI Request for Room ID: ${this.roomId} ===`);
+            console.log(`System Prompt: ${systemPrompt.substring(0, 200)}...`);
+            console.log(`User Prompt: ${userPrompt}`);
             const response = await openai.chat.completions.create({
-                model: 'gpt-4.1-mini',
+                model: 'gpt-4.1', // Updated to use a more reliable model
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userPrompt }
@@ -95,32 +99,72 @@ class RoomAgent {
                 max_tokens: 10000,
             });
             const content = response.choices[0]?.message?.content;
+            console.log(`=== OpenAI Response for Room ID: ${this.roomId} ===`);
+            console.log(`Raw Content: ${content}`);
             if (content) {
                 try {
                     const generatedData = JSON.parse(content);
+                    console.log(`=== Parsed JSON for Room ID: ${this.roomId} ===`);
+                    console.log(JSON.stringify(generatedData, null, 2));
+                    // Validate SYSTEM_PROMPT format
+                    const requiredFields = ['name', 'background', 'password', 'hint', 'objects', 'escape'];
+                    const missingFields = requiredFields.filter(field => !(field in generatedData));
+                    if (missingFields.length > 0) {
+                        console.error(`Generated JSON missing required fields for room ID ${this.roomId}:`, missingFields);
+                        console.log('Adding default values for missing fields...');
+                        // Add default values for missing fields
+                        if (!generatedData.hint)
+                            generatedData.hint = "Look for clues in the objects to find the password";
+                        if (!generatedData.escape)
+                            generatedData.escape = false;
+                        if (!generatedData.objects)
+                            generatedData.objects = [];
+                    }
+                    // Validate object structure
+                    if (Array.isArray(generatedData.objects)) {
+                        const objectRequiredFields = ['name', 'description', 'puzzle', 'answer', 'lock'];
+                        generatedData.objects.forEach((obj, index) => {
+                            const objMissingFields = objectRequiredFields.filter(field => !(field in obj));
+                            if (objMissingFields.length > 0) {
+                                console.warn(`Object ${index} in room ${this.roomId} missing fields:`, objMissingFields);
+                                // Add default values
+                                if (!obj.puzzle)
+                                    obj.puzzle = "Hidden puzzle within the description";
+                                if (!obj.answer)
+                                    obj.answer = "unknown";
+                                if (obj.lock === undefined)
+                                    obj.lock = false;
+                            }
+                        });
+                    }
+                    console.log(`=== Final Validated Data for Room ID: ${this.roomId} ===`);
+                    console.log(JSON.stringify(generatedData, null, 2));
                     if (generatedData.name && generatedData.background && generatedData.password && generatedData.objects) {
-                        this.roomData = { ...generatedData, id: this.roomId, sequence: this.sequence }; //parsing the GameData object to this.roomData
-                        console.log(`Successfully generated room data for ID: ${this.roomId}`);
-                        console.log('Generated room data:', this.roomData);
+                        this.roomData = { ...generatedData, id: this.roomId, sequence: this.sequence };
+                        console.log(`✅ Successfully generated and validated room data for ID: ${this.roomId}`);
+                        console.log(`Room Name: ${this.roomData.name}`);
+                        console.log(`Password: ${this.roomData.password}`);
+                        console.log(`Hint: ${this.roomData.hint}`);
+                        console.log(`Objects Count: ${Array.isArray(this.roomData.objects) ? this.roomData.objects.length : Object.keys(this.roomData.objects).length}`);
                     }
                     else {
-                        console.error('Generated JSON lacks required fields for room ID:', this.roomId);
-                        this.setupFallbackRoom('Generated JSON lacks required fields.');
+                        console.error('Generated JSON still lacks required fields after validation for room ID:', this.roomId);
+                        this.setupFallbackRoom('Generated JSON lacks required fields even after validation.');
                     }
                 }
                 catch (parseError) {
-                    console.error('Error parsing JSON content for room ID:', this.roomId, parseError);
+                    console.error('Error: parsing JSON content for room ID:', this.roomId, parseError);
                     console.log('Content that failed to parse:', content);
                     this.setupFallbackRoom('Failed to parse generated JSON.');
                 }
             }
             else {
-                console.error('OpenAI response content is null for room ID:', this.roomId);
+                console.error('Error: OpenAI response content is null for room ID:', this.roomId);
                 this.setupFallbackRoom('No content received from OpenAI.');
             }
         }
         catch (error) {
-            console.error('OpenAI API call failed for room ID:', this.roomId, error);
+            console.error('Error: OpenAI API call failed for room ID:', this.roomId, error);
             this.setupFallbackRoom('OpenAI API call failed.');
         }
         this.isGenerating = false;
@@ -134,12 +178,17 @@ class RoomAgent {
             name: `Fallback Room ${this.sequence ?? this.roomId}`,
             background: `This is a fallback room. Reason: ${reason}. The ID is ${this.roomId}.`,
             password: "fallback123",
+            hint: "fallback hint",
+            escape: false,
             // Ensure objects format matches RoomData (array or record)
             // Let's use array for fallback
             objects: [
                 {
                     name: "Fallback Note",
                     description: "A note left behind due to an error.",
+                    puzzle: "fallback puzzle",
+                    answer: "fallback answer",
+                    lock: false,
                     details: [
                         `An error occurred: ${reason}`,
                         `The password is \"fallback123\"`

@@ -2,11 +2,12 @@
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
+import { saveUserToFirebase, emailExistsInFirebase } from '../services/firebaseService';
 
 // In-memory user store (replace with DB in production)
 // This should be shared or passed to the controller, or use a proper service layer
 // For now, let's define it here for simplicity, but it might need to be moved or managed centrally
-interface User {
+export interface User {
   id: string;
   name: string;
   email?: string;
@@ -16,8 +17,7 @@ interface User {
     openai?: string;
   };
   registeredAt: string;
-  // Add passwordHash if you implement password-based login
-  passwordHash?: string; 
+  passwordHash?: string; //TODO: Implement password-based login
 }
 
 export const users: Record<string, User> = {}; // Export for now, ideally manage via a service
@@ -26,16 +26,26 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-very-secure-secret'; // Ensur
 const JWT_EXPIRES_IN = '24h';
 
 // Register a new user
-export function register(req: Request, res: Response): void {
+export async function register(req: Request, res: Response): Promise<void> {
   const { name, email, apiKey, provider = 'openai' } = req.body;
   if (!name) {
     res.status(400).json({ error: 'Name is required' });
     return;
   }
 
-  // Optional: Check if user already exists by email or name if they should be unique
-  // For example: if (Object.values(users).some(u => u.email === email)) { ... }
+  // Check if email already exists in Firebase
+  if (email) {
+    const emailExists = await emailExistsInFirebase(email);
+    if (emailExists) {
+      res.status(409).json({ error: 'Email already registered' });
+      return;
+    }
+  }
 
+
+  //-----------------------------------------------------------------------
+  // CREATE NEW USER
+  //-----------------------------------------------------------------------
   const userId = uuidv4();
   const newUser: User = {
     id: userId,
@@ -46,6 +56,11 @@ export function register(req: Request, res: Response): void {
     // If using passwords, hash it here: passwordHash: bcrypt.hashSync(password, 10)
   };
   users[userId] = newUser;
+
+  // Save to Firebase asynchronously
+  saveUserToFirebase(newUser).catch(error => {
+    console.error('Failed to save user to Firebase:', error);
+  });
 
   // Sign a token upon successful registration
   const payload = { sub: userId, name: name }; // 'sub' is standard for subject (user ID)
@@ -96,7 +111,7 @@ export function login(req: Request, res: Response): void {
     });
 }
 
-// Example of fetching user data - adapt as needed
+
 // AuthRequest should be imported from jwtMiddleware
 import { AuthRequest } from './jwtMiddleware'; 
 

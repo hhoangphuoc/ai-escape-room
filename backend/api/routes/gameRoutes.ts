@@ -57,13 +57,22 @@ router.get('/look', async (req: AuthRequest, res: Response): Promise<void> => {
     const { gameInstance } = userSession;
     try {
         const result = await gameInstance.process('/look');
+        console.log(`=== /look COMMAND RESULT FOR USER ${userId} ===`);
+        console.log(`Raw result:`, JSON.stringify(result, null, 2));
+        
         const roomName = result.data?.room?.name || userSession.currentRoomName || 'Unknown Room';
         const objectNames: string[] = result.data?.objects || [];
-        res.json({ 
+        
+        const response = { 
             roomName,
             objects: objectNames,
             message: result.data?.message || result.response 
-        });
+        };
+        
+        console.log(`=== /look API RESPONSE TO CLI ===`);
+        console.log(JSON.stringify(response, null, 2));
+        
+        res.json(response);
     } catch (error) {
         console.error(`API Error in /look for user ${userId}:`, error);
         res.status(500).json({ error: "Failed to look around the room." });
@@ -91,13 +100,27 @@ router.get('/inspect', async (req: AuthRequest, res: Response): Promise<void> =>
     try {
         const command = `/inspect ${objectName}`;
         const result = await gameInstance.process(command);
+        
+        console.log(`=== /inspect COMMAND RESULT FOR USER ${userId} ===`);
+        console.log(`Object: ${objectName}`);
+        console.log(`Raw result:`, JSON.stringify(result, null, 2));
+        
         if (result.data?.object) {
-            res.json({
+            const response = {
                 object: result.data.object,
                 message: result.data?.message || `Inspecting ${objectName}`
-            });
+            };
+            
+            console.log(`=== /inspect API RESPONSE TO CLI ===`);
+            console.log(JSON.stringify(response, null, 2));
+            
+            res.json(response);
         } else {
-            res.status(404).json({ error: result.data?.message || `Object '${objectName}' not found.` });
+            const errorResponse = { error: result.data?.message || `Object '${objectName}' not found.` };
+            console.log(`=== /inspect ERROR RESPONSE ===`);
+            console.log(JSON.stringify(errorResponse, null, 2));
+            
+            res.status(404).json(errorResponse);
         }
     } catch (error) {
         console.error(`API Error in /inspect for user ${userId}:`, error);
@@ -428,7 +451,45 @@ router.post('/newgame', async (req: AuthRequest, res: Response): Promise<void> =
         if (newGameSession && initialRoomData) {
             userActiveGames[userId] = newGameSession;
             console.log(`API: New game created for user ${userId}. Mode: [${actualGameMode}] - GameID: [${newGameSession.gameId}]`);
-            res.json({
+            
+            // Enhanced logging for JSON response debugging
+            console.log(`=========================== ROOM DATA GENERATED FOR ${actualGameMode.toUpperCase()} GAME ===========================`);
+            console.log(`Room ID: ${initialRoomData.id}`);
+            console.log(`Room Name: ${initialRoomData.name}`);
+            console.log(`Room Background: ${initialRoomData.background}`);
+            console.log(`Room Password: ${initialRoomData.password}`);
+            console.log(`Room Hint: ${initialRoomData.hint || 'NO HINT AVAILABLE'}`);
+            console.log(`Room Escape Status: ${initialRoomData.escape}`);
+            console.log(`Objects Count: ${Array.isArray(initialRoomData.objects) ? initialRoomData.objects.length : Object.keys(initialRoomData.objects).length}`);
+            
+            if (Array.isArray(initialRoomData.objects)) {
+                console.log(`================================= OBJECTS ARRAY FORMAT ======================================`);
+                initialRoomData.objects.forEach((obj, index) => {
+                    console.log(`Object ${index + 1}:`);
+                    console.log(`  Name: ${obj.name}`);
+                    console.log(`  Description: ${obj.description.substring(0, 100)}...`);
+                    console.log(`  Puzzle: ${obj.puzzle || 'NO PUZZLE'}`);
+                    console.log(`  Answer: ${obj.answer || 'NO ANSWER'}`);
+                    console.log(`  Lock: ${obj.lock}`);
+                    console.log(`  Details: ${obj.details ? obj.details.length + ' items' : 'NO DETAILS'}`);
+                });
+            } else {
+                console.log(`================================= OBJECTS RECORD FORMAT ======================================`);
+                Object.entries(initialRoomData.objects).forEach(([key, obj]) => {
+                    console.log(`Object Key: ${key}`);
+                    console.log(`  Name: ${obj.name}`);
+                    console.log(`  Description: ${obj.description.substring(0, 100)}...`);
+                    console.log(`  Puzzle: ${obj.puzzle || 'NO PUZZLE'}`);
+                    console.log(`  Answer: ${obj.answer || 'NO ANSWER'}`);
+                    console.log(`  Lock: ${obj.lock}`);
+                    console.log(`  Details: ${obj.details ? obj.details.length + ' items' : 'NO DETAILS'}`);
+                });
+            }
+            
+            console.log(`================================= FULL ROOM DATA JSON ======================================`);
+            console.log(JSON.stringify(initialRoomData, null, 2));
+            
+            const gameResponse = {
                 success: true,
                 message: `New ${actualGameMode} game started. Room ${responseInitialRoomSequence}: ${responseGameName}.`,
                 game: {
@@ -440,9 +501,16 @@ router.post('/newgame', async (req: AuthRequest, res: Response): Promise<void> =
                     objectCount: initialRoomData.objects ? (Array.isArray(initialRoomData.objects) ? initialRoomData.objects.length : Object.keys(initialRoomData.objects).length) : 0,
                     mode: actualGameMode, 
                     totalRooms: responseTotalRooms,
-                    startTime: newGameSession.startTime.toISOString()
+                    startTime: newGameSession.startTime.toISOString(),
+                    // Add room data for CLI debugging
+                    roomData: initialRoomData
                 }
-            });
+            };
+            
+            console.log(`================================= API RESPONSE TO CLI ======================================`);
+            console.log(JSON.stringify(gameResponse, null, 2));
+            
+            res.json(gameResponse);
         } else {
              throw new Error("Game session or initial room data was not initialized.");
         }
@@ -673,11 +741,14 @@ router.post('/chat', async (req: AuthRequest, res: Response): Promise<void> => {
         const model_specs: Record<string, any> = {
             'gpt-4o': { max_completion_tokens: 10000, temperature: 0.7, top_p: 1 },
             'gpt-4o-mini': { max_completion_tokens: 10000, temperature: 0.7, top_p: 1 },
+            'gpt-4.1': { max_completion_tokens: 10000, temperature: 0.7, top_p: 1 },
+            'gpt-4.1-mini': { max_completion_tokens: 10000, temperature: 0.7, top_p: 1 },
              'o3': { reasoning_effort: "medium", store: false },
              'o3-mini': { reasoning_effort: "medium", store: false },
+             'o4-mini': { reasoning_effort: "medium", store: false },
         }
 
-        const currentModelSpec = model_specs[model] || { max_tokens: 150 }; // Default if model not in specs
+        const currentModelSpec = model_specs[model] || { max_completion_tokens: 150 }; // Default if model not in specs
         const systemContent = `You are an AI assistant in an escape room. Current room: ${roomContext} Objects: ${objectsContext}`;
 
         if (model.startsWith('gpt') || model.startsWith('o')) {

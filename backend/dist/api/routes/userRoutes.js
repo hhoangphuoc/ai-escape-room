@@ -41,7 +41,7 @@ router.post('/auth', jwtMiddleware_1.jwtAuth, (req, res) => {
         return;
     }
     const { apiKeys, passwordHash, ...userData } = userFromToken;
-    console.log(`API: User authenticated: ${userData.name} (${jwtPayload.sub})`);
+    console.log(`API: User authenticated: ${userData.name} (user id: ${jwtPayload.sub})`);
     res.json({ authenticated: true, user: userData });
 });
 // Test POST route - can be public or protected based on needs
