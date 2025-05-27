@@ -1,7 +1,7 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-export const VERCEL_DOMAIN = "https://ai-escape-room-nedap.vercel.app";
+export const VERCEL_DOMAIN = "https://ai-escape-room-phuoc-nedap.vercel.app";
 
 // The environment variable the CLI will check for a custom API URL.
 const LOCAL_API_URL = process.env['LOCAL_API_URL']; //http://localhost:3001
