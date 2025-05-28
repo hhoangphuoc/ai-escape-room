@@ -136,14 +136,29 @@ exports.getUserFromFirebase = getUserFromFirebase;
 // Check if email already exists
 const emailExistsInFirebase = async (email) => {
     if (!usersCollection || !email) {
+        console.log('Firebase not initialized or empty email provided');
         return false;
     }
     try {
-        const snapshot = await usersCollection.where('email', '==', email).limit(1).get();
-        return !snapshot.empty;
+        console.log(`Firebase: Starting email existence check for: ${email}`);
+        // Add a timeout to prevent hanging
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Firebase email check timeout')), 10000); // 10 second timeout
+        });
+        const queryPromise = usersCollection.where('email', '==', email).limit(1).get();
+        const snapshot = await Promise.race([queryPromise, timeoutPromise]);
+        const exists = !snapshot.empty;
+        console.log(`Firebase: Email existence check completed. Email ${email} exists: ${exists}`);
+        return exists;
     }
     catch (error) {
         console.error('Error checking email existence:', error);
+        // If Firebase is unreachable or has issues, we should allow registration to continue
+        // rather than blocking users. Log the error but return false to not block registration.
+        if (error instanceof Error) {
+            console.error(`Firebase error details: ${error.message}`);
+        }
+        console.log('Returning false to allow registration to continue despite Firebase error');
         return false;
     }
 };

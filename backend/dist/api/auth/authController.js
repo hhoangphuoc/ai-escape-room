@@ -16,16 +16,27 @@ const JWT_EXPIRES_IN = '24h';
 // Register a new user
 async function register(req, res) {
     const { name, email, apiKey, provider = 'openai' } = req.body;
+    console.log(`API: Registration attempt - name: ${name}, email: ${email}, provider: ${provider}`);
     if (!name) {
         res.status(400).json({ error: 'Name is required' });
         return;
     }
     // Check if email already exists in Firebase
     if (email) {
-        const emailExists = await (0, firebaseService_1.emailExistsInFirebase)(email);
-        if (emailExists) {
-            res.status(409).json({ error: 'Email already registered' });
-            return;
+        try {
+            console.log(`API: Checking if email exists in Firebase: ${email}`);
+            const emailExists = await (0, firebaseService_1.emailExistsInFirebase)(email);
+            console.log(`API: Email check result: ${emailExists}`);
+            if (emailExists) {
+                console.log(`API: Email ${email} already registered - returning 409`);
+                res.status(409).json({ error: 'Email already registered' });
+                return;
+            }
+        }
+        catch (firebaseError) {
+            console.error('API: Firebase email check failed:', firebaseError);
+            // Continue with registration if Firebase check fails
+            console.log('API: Continuing with registration despite Firebase check failure');
         }
     }
     //-----------------------------------------------------------------------
@@ -41,14 +52,15 @@ async function register(req, res) {
         // If using passwords, hash it here: passwordHash: bcrypt.hashSync(password, 10)
     };
     exports.users[userId] = newUser;
-    // Save to Firebase asynchronously
+    // Save to Firebase asynchronously with error handling
     (0, firebaseService_1.saveUserToFirebase)(newUser).catch(error => {
         console.error('Failed to save user to Firebase:', error);
+        // Don't fail the registration if Firebase save fails
     });
     // Sign a token upon successful registration
     const payload = { sub: userId, name: name }; // 'sub' is standard for subject (user ID)
     const token = jsonwebtoken_1.default.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-    console.log(`API: User registered: ${name} (${userId})`);
+    console.log(`API: User registered successfully: ${name} (${userId})`);
     res.status(201).json({
         message: 'User registered successfully',
         userId,

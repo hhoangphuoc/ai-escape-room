@@ -107,7 +107,7 @@ class RoomAgent {
                     console.log(`=== Parsed JSON for Room ID: ${this.roomId} ===`);
                     console.log(JSON.stringify(generatedData, null, 2));
                     // Validate SYSTEM_PROMPT format
-                    const requiredFields = ['name', 'background', 'password', 'hint', 'objects', 'escape'];
+                    const requiredFields = ['name', 'background', 'password', 'hint', 'objects', 'escaped'];
                     const missingFields = requiredFields.filter(field => !(field in generatedData));
                     if (missingFields.length > 0) {
                         console.error(`Generated JSON missing required fields for room ID ${this.roomId}:`, missingFields);
@@ -301,7 +301,9 @@ class RoomAgent {
         // 								/password <password>
         // -------------------------------------------------------------------------------------------------
         if (lc.startsWith('/password ')) {
-            const pass = cmd.substring(7).trim();
+            const pass = cmd.substring(9).trim();
+            console.log(`RoomAgent: Original password: ${currentRoomData.password}`);
+            console.log(`RoomAgent: Received /password request with: ${pass}`);
             if (pass.toLowerCase() === currentRoomData.password.toLowerCase()) {
                 const isLastRoom = this.sequence !== null && this.totalRooms !== null && this.sequence >= this.totalRooms;
                 const message = `Correct! The password '${currentRoomData.password}' unlocks the door.` + (isLastRoom ? ` Congratulations, you've completed the final room!` : '');

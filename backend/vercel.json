@@ -4,9 +4,17 @@
     {
       "src": "dist/api/server.js",
       "use": "@vercel/node"
+    },
+    {
+      "src": "dist/api/mcp.js",
+      "use": "@vercel/node"
     }
   ],
   "routes": [
+    {
+      "src": "/api/mcp",
+      "dest": "dist/api/mcp.js"
+    },
     {
       "src": "/(.*)",
       "dest": "dist/api/server.js"
