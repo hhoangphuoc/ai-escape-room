@@ -75,9 +75,17 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
       let initialEmail = email;   // Start with prop
 
       try {
+        // console.log(`CLI: Checking for config file at: ${USER_CONFIG_FILE}`);
         if (fs.existsSync(USER_CONFIG_FILE)) {
+          // console.log('CLI: Config file found, loading...');
           const configRaw = fs.readFileSync(USER_CONFIG_FILE, 'utf8');
           const loadedConfig = JSON.parse(configRaw) as UserConfig;
+          // console.log('CLI: Loaded config:', { 
+          //   name: loadedConfig.name, 
+          //   email: loadedConfig.email, 
+          //   userId: loadedConfig.userId ? 'present' : 'missing',
+          //   hasApiKeys: !!loadedConfig.apiKeys 
+          // });
 
           initialName = loadedConfig.name || initialName; // Config overrides prop if present
           initialEmail = loadedConfig.email || initialEmail;
@@ -101,44 +109,78 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
             loginProvider = 'anthropic';
           }
 
-          //LOGIN INSTEAD OF REGISTER --------------------------------------------------------------------------------------------------
-          if (loadedConfig.userId && initialName) { // Ensure name is also present
-            // Pass API key and provider to login if available
-            const loginResponse = await handleLogin(
-              loadedConfig.userId, 
-              loginApiKey, 
-              loginProvider
-            );
-            const loginData = await loginResponse.json() as any; //FIXME: as { token: string; error?: string };
+          // EXPLICIT FIREBASE CHECK AND LOGIN --------------------------------------------------------------------------------------------------
+          if (loadedConfig.userId && initialName) { 
+            // console.log(`CLI: Found stored userId: ${loadedConfig.userId}`);
+            setMessage('Verifying user account with server...');
+            
+            try {
+              // Attempt login directly - the backend will check Firebase
+              // console.log('CLI: Attempting automatic login with stored credentials...');
+              const loginResponse = await handleLogin(
+                loadedConfig.userId, 
+                loginApiKey, 
+                loginProvider
+              );
+              const loginData = await loginResponse.json() as any;
 
-            if (loginResponse.ok && loginData.token) {
-              setMessage('Welcome back! Session restored.');
-              setStep('complete');
-              const sessionApiKey = loginApiKey || process.env['OPENAI_API_KEY'] || process.env['ANTHROPIC_API_KEY'];
-              const sessionProvider = loginApiKey ? loginProvider : (process.env['OPENAI_API_KEY'] ? 'openai' : 'anthropic');
-              
-              onRegistrationComplete({ 
-                name: initialName, 
-                email: initialEmail || undefined,
-                userId: loadedConfig.userId, 
-                token: loginData.token,
-                apiKey: sessionApiKey,
-                apiKeyProvider: sessionProvider
-              });
-              proceedToManualReg = false; 
-            } else {
-              setMessage(`Login attempt failed: ${loginData.error || 'Could not restore session.'}. Please verify details or register.`);
+              if (loginResponse.ok && loginData.token) {
+                // console.log('CLI: Automatic login successful');
+                setMessage('Welcome back! Session restored successfully.');
+                setStep('complete');
+                
+                const sessionApiKey = loginApiKey || process.env['OPENAI_API_KEY'] || process.env['ANTHROPIC_API_KEY'];
+                const sessionProvider = loginApiKey ? loginProvider : (process.env['OPENAI_API_KEY'] ? 'openai' : 'anthropic');
+                
+                onRegistrationComplete({ 
+                  name: initialName, 
+                  email: initialEmail || undefined,
+                  userId: loadedConfig.userId, 
+                  token: loginData.token,
+                  apiKey: sessionApiKey,
+                  apiKeyProvider: sessionProvider
+                });
+                proceedToManualReg = false;
+                return; // Exit early on successful login
+              } else {
+                // Login failed - could be user not found in Firebase or other issues
+                // console.log(`CLI: Automatic login failed: ${loginData.error || 'Unknown error'}`);
+                
+                if (loginResponse.status === 404) {
+                  setMessage(`User account not found in database. The stored user ID (${loadedConfig.userId}) may no longer exist. Please register again.`);
+                  // Clear the invalid config
+                  try {
+                    fs.unlinkSync(USER_CONFIG_FILE);
+                    // console.log('CLI: Cleared invalid config file');
+                  } catch (unlinkError) {
+                    // console.log('CLI: Could not clear config file:', unlinkError);
+                  }
+                } else {
+                  setMessage(`Login failed: ${loginData.error || 'Could not restore session.'}. Please verify details or register again.`);
+                }
+              }
+            } catch (loginError) {
+              console.error('CLI: Error during automatic login attempt:', loginError);
+              setMessage('Could not connect to server for login verification. Please check your connection and try again.');
             }
+          } else {
+            console.log('CLI: No valid userId or name found in config file');
+            setMessage('Incomplete configuration found. Please complete registration.');
           }
           // ------------------------------------------------------------------------------------------------------------------------------
+        } else {
+          console.log('CLI: No config file found - this is a new user');
+          setMessage('No previous session found. Please register to continue.');
         }
       } catch (error) {
-        setMessage('Could not load config or login. Please register.');
+        console.error('CLI: Error loading config or attempting login:', error);
+        setMessage('Could not load configuration. Please register.');
       }
       
 
       // FALLBACK TO MANUAL REGISTRATION --------------------------------------------------------------------------------------------------
       if (proceedToManualReg) {
+        // console.log('CLI: Proceeding to manual registration flow');
         if (!currentCliApiKey) { // If no API key from config, check ENV
             const openaiEnvKey = process.env['OPENAI_API_KEY'];
             const anthropicEnvKey = process.env['ANTHROPIC_API_KEY'];
@@ -189,20 +231,31 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
     if (userEmail) registrationPayload.email = userEmail;
     if (finalRegApiKey) registrationPayload.apiKey = finalRegApiKey;
 
+    // console.log('CLI: Sending registration request...');
+
     let receivedUserId: string | undefined;
     let receivedToken: string | undefined;
 
     try {
       const apiUrl = getApiUrl();
+      // console.log(`CLI: Sending request to: ${apiUrl}/api/users/register`);
+      
       const response = await fetch(`${apiUrl}/api/users/register`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(registrationPayload)
       });
-      const data = await response.json() as any; //FIXME: as { userId: string; token: string; error?: string };
+
+      // console.log(`CLI: Response status: ${response.status}`);
+      
+      const data = await response.json() as any;
+      // console.log('CLI: Response data:', data);
+      
       if (response.ok && data.userId && data.token) {
         receivedUserId = data.userId;
         receivedToken = data.token;
         setMessage('Registered with backend server!');
+        
         try {
             const configToSave: UserConfig = {
                 name,
@@ -211,11 +264,12 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
                 apiKeys: finalRegApiKey && finalRegProvider ? { [finalRegProvider]: finalRegApiKey } : undefined
             };
             if (userEmail) configToSave.email = userEmail;
-            else delete configToSave.email; // Ensure email field is not present if empty
 
             fs.writeFileSync(USER_CONFIG_FILE, JSON.stringify(configToSave, null, 2));
+            // console.log(`CLI: Configuration saved to ${USER_CONFIG_FILE}`);
             setMessage('Configuration saved! Registration complete.');
             setStep('complete');
+            
             onRegistrationComplete({ 
                 name, 
                 email: userEmail || undefined, 
@@ -225,8 +279,10 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
                 apiKeyProvider: finalRegProvider 
             });
         } catch (saveError) {
-            setMessage('Registered, but error saving config locally.');
+            console.error('CLI: Error saving config locally:', saveError);
+            setMessage('Registered successfully, but could not save configuration locally.');
             setStep('complete'); 
+            
             onRegistrationComplete({ 
                 name, 
                 email: userEmail || undefined,
@@ -237,12 +293,35 @@ const UserRegistration: React.FC<UserRegistrationProps> = ({
             });
         }
       } else {
-        setMessage(`Backend registration failed: ${data.error || 'Unknown error'}.`);
+        // Enhanced error handling for different HTTP status codes
+        let errorMessage = `Registration failed: ${data.error || 'Unknown error'}`;
+        
+        if (response.status === 409) {
+          errorMessage = `Email already registered: ${data.error || 'Try using a different email.'}`;
+        } else if (response.status === 400) {
+          errorMessage = `Invalid registration data: ${data.error || 'Please check your inputs.'}`;
+        } else if (response.status >= 500) {
+          errorMessage = `Server error (${response.status}): ${data.error || 'Please try again later.'}`;
+        }
+        
+        console.error(`CLI: Registration failed with status ${response.status}:`, data);
+        setMessage(errorMessage);
         setStep('apiKey');
         setIsSubmitting(false);
       }
     } catch (networkError) {
-      setMessage('Network error. Could not register.');
+      console.error('CLI: Network error during registration:', networkError);
+      
+      let errorMessage = 'Network error. Could not register.';
+      if (networkError instanceof Error) {
+        if (networkError.message.includes('fetch')) {
+          errorMessage = 'Connection failed. Please check your internet connection and server status.';
+        } else if (networkError.message.includes('timeout')) {
+          errorMessage = 'Request timed out. Please try again.';
+        }
+      }
+      
+      setMessage(errorMessage);
       setStep('apiKey');
       setIsSubmitting(false);
     }

@@ -28,6 +28,8 @@ const JWT_EXPIRES_IN = '24h';
 // Register a new user
 export async function register(req: Request, res: Response): Promise<void> {
   const { name, email, apiKey, provider = 'openai' } = req.body;
+  console.log(`API: Registration attempt - name: ${name}, email: ${email}, provider: ${provider}`);
+  
   if (!name) {
     res.status(400).json({ error: 'Name is required' });
     return;
@@ -35,13 +37,22 @@ export async function register(req: Request, res: Response): Promise<void> {
 
   // Check if email already exists in Firebase
   if (email) {
-    const emailExists = await emailExistsInFirebase(email);
-    if (emailExists) {
-      res.status(409).json({ error: 'Email already registered' });
-      return;
+    try {
+      console.log(`API: Checking if email exists in Firebase: ${email}`);
+      const emailExists = await emailExistsInFirebase(email);
+      console.log(`API: Email check result: ${emailExists}`);
+      
+      if (emailExists) {
+        console.log(`API: Email ${email} already registered - returning 409`);
+        res.status(409).json({ error: 'Email already registered' });
+        return;
+      }
+    } catch (firebaseError) {
+      console.error('API: Firebase email check failed:', firebaseError);
+      // Continue with registration if Firebase check fails
+      console.log('API: Continuing with registration despite Firebase check failure');
     }
   }
-
 
   //-----------------------------------------------------------------------
   // CREATE NEW USER
@@ -57,16 +68,17 @@ export async function register(req: Request, res: Response): Promise<void> {
   };
   users[userId] = newUser;
 
-  // Save to Firebase asynchronously
+  // Save to Firebase asynchronously with error handling
   saveUserToFirebase(newUser).catch(error => {
     console.error('Failed to save user to Firebase:', error);
+    // Don't fail the registration if Firebase save fails
   });
 
   // Sign a token upon successful registration
   const payload = { sub: userId, name: name }; // 'sub' is standard for subject (user ID)
   const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
-  console.log(`API: User registered: ${name} (${userId})`);
+  console.log(`API: User registered successfully: ${name} (${userId})`);
   res.status(201).json({ 
     message: 'User registered successfully', 
     userId,
