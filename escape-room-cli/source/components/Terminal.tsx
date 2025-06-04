@@ -77,6 +77,14 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 		setHasAICapability(!!cliApiKey || !!process.env['OPENAI_API_KEY'] || !!process.env['ANTHROPIC_API_KEY']); // AI capability now depends on the session's API key state
 	}, [cliApiKey]);
 
+    useEffect(() => {
+        if (userId && sessionToken) {
+            fetchGameState();
+        }
+    }, [userId, sessionToken]);
+    
+    //-------------------------------------------------------------------------------------------------
+
 	const checkBackendConnection = async () => {
 		try {
 			const controller = new AbortController();
@@ -294,6 +302,7 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
             '/guess [object] [answer] - Guess the puzzle answer for an object',
 			'/password [password] - Submit the password to unlock the door',
             '/hint - Get a hint about the password',
+            '/leaderboard - View the top 10 players on the leaderboard',
             '/logout - End your current session',
         ] : [
             '/register - Start the registration process (or use CLI flags)',
@@ -640,7 +649,7 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                                         response = data.message + (data.timeElapsed ? `\nTime: ${data.timeElapsed} seconds` : '');
                                         if (data.gameCompleted) {
                                             setCurrentRoomName('Congratulations!');
-                                            setCurrentRoomBackground('Game Completed. You can start a new game with /newgame.');
+                                            setCurrentRoomBackground('Game Completed. You can start try out with a new game [/newgame] or [/logout] to end your session.');
                                             setCurrentGameId(null);
                                         }
                                     } else {
@@ -711,6 +720,50 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                             break;
                         case '/newgame': response = sessionToken ? await handleGenerateNewGame(parts[1]?.toLowerCase()) : "You are not in a game session. Please login first."; break;
                         case '/status': response = sessionToken ? await sendCommand('/status') : "You are not in a game session. Please login first."; break;
+                        case '/leaderboard':
+                            if (!sessionToken) {
+                                response = "You are not in a game session. Please login first.";
+                            } else {
+                                const apiUrl = getApiUrl();
+                                try {
+                                    const leaderboardResponse = await fetch(`${apiUrl}/api/game/leaderboard/games`, {
+                                        headers: { 'Authorization': `Bearer ${sessionToken}` }
+                                    });
+                                    if (leaderboardResponse.ok) {
+                                        const data = await leaderboardResponse.json() as any;
+                                        
+                                        console.log('=== CLI: /leaderboard RESPONSE RECEIVED ===');
+                                        console.log(JSON.stringify(data, null, 2));
+                                        
+                                        if (data.leaderboard && data.leaderboard.length > 0) {
+                                            let leaderboardText = "🏆 TOP 10 LEADERBOARD 🏆\n\n";
+                                            leaderboardText += "Rank | Player | Time | Hints | Mode\n";
+                                            leaderboardText += "─────┼────────┼──────┼───────┼─────────\n";
+                                            
+                                            data.leaderboard.forEach((entry: any, index: number) => {
+                                                const rank = (index + 1).toString().padStart(4, ' ');
+                                                const player = entry.userName.substring(0, 8).padEnd(8, ' ');
+                                                const time = `${entry.timeElapsed}s`.padEnd(6, ' ');
+                                                const hints = entry.hintsUsed.toString().padStart(5, ' ');
+                                                const mode = entry.gameMode.substring(0, 9).padEnd(9, ' ');
+                                                leaderboardText += `${rank} │ ${player} │ ${time} │${hints} │ ${mode}\n`;
+                                            });
+                                            
+                                            response = leaderboardText;
+                                        } else {
+                                            response = "No completed games found on the leaderboard yet. Be the first to complete a game!";
+                                        }
+                                    } else {
+                                        const errorData = await leaderboardResponse.json() as any;
+                                        response = errorData.error || "Failed to fetch leaderboard.";
+                                    }
+                                } catch (error) {
+                                    console.error('=== CLI: /leaderboard NETWORK ERROR ===');
+                                    console.error(error);
+                                    response = "Error: Could not fetch leaderboard.";
+                                }
+                            }
+                            break;
                         case '/history': setShowHistory(true); response = 'Showing command history:'; break;
                         case '/model': 
                             if (hasAICapability) { setShowModelSelector(true); response = 'Opening model selector...'; }

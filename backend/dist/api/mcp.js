@@ -74,7 +74,7 @@ const handler = (0, mcp_adapter_1.createMcpHandler)(async (server) => {
                 return {
                     content: [{
                             type: 'text',
-                            text: `❌ Failed to generate game. Could not create valid room data.`
+                            text: `Failed to generate game. Could not create valid room data.`
                         }]
                 };
             }
@@ -94,7 +94,7 @@ const handler = (0, mcp_adapter_1.createMcpHandler)(async (server) => {
             return {
                 content: [{
                         type: 'text',
-                        text: `🎮 Game Successfully Generated!
+                        text: `Game Successfully Generated!
 
 **Game ID**: ${sessionId}
 **Player**: ${userName} (${userEmail})
@@ -131,7 +131,7 @@ Your escape room adventure has begun! Use the other MCP tools to explore the gam
                 return {
                     content: [{
                             type: 'text',
-                            text: `❌ Game session not found. Please generate a game first using the generate_game tool.`
+                            text: `Game session not found. Please generate a game first using the generate_game tool.`
                         }]
                 };
             }
@@ -147,7 +147,7 @@ Your escape room adventure has begun! Use the other MCP tools to explore the gam
                 return {
                     content: [{
                             type: 'text',
-                            text: `❌ Could not retrieve room data for game ${gameId}`
+                            text: `Could not retrieve room data for game ${gameId}`
                         }]
                 };
             }
@@ -155,11 +155,11 @@ Your escape room adventure has begun! Use the other MCP tools to explore the gam
             const objects = Array.isArray(currentRoomData.objects)
                 ? currentRoomData.objects
                 : Object.values(currentRoomData.objects);
-            const objectNames = objects.map(obj => obj.name);
+            const objectNames = objects.map((obj) => obj.name);
             return {
                 content: [{
                         type: 'text',
-                        text: `🏠 **${currentRoomData.name}** (Room ${session.currentRoomSequence}/${session.totalRooms})
+                        text: `**${currentRoomData.name}** (Room ${session.currentRoomSequence}/${session.totalRooms})
 
 **Background**: ${currentRoomData.background || 'No background available'}
 
@@ -168,9 +168,9 @@ Your escape room adventure has begun! Use the other MCP tools to explore the gam
 **Room Password**: ${currentRoomData.password || 'Unknown'}
 
 **Objects in Room** (${objectNames.length}):
-${objectNames.map(name => `• ${name}`).join('\n')}
+${objectNames.map((name) => `• ${name}`).join('\n')}
 
-**Escape Status**: ${currentRoomData.escaped ? '✅ Escaped!' : '🔒 Still locked'}
+**Escape Status**: ${currentRoomData.escaped ? 'Escaped!' : 'Still locked'}
 
 **Player**: ${session.userName} (${session.userEmail})
 **Game Mode**: ${session.gameMode}`
@@ -181,7 +181,7 @@ ${objectNames.map(name => `• ${name}`).join('\n')}
             return {
                 content: [{
                         type: 'text',
-                        text: `❌ Error retrieving game contents: ${error instanceof Error ? error.message : String(error)}`
+                        text: `Error retrieving game contents: ${error instanceof Error ? error.message : String(error)}`
                     }]
             };
         }
@@ -196,7 +196,7 @@ ${objectNames.map(name => `• ${name}`).join('\n')}
                 return {
                     content: [{
                             type: 'text',
-                            text: `❌ Game session not found. Please generate a game first using the generate_game tool.`
+                            text: `Game session not found. Please generate a game first using the generate_game tool.`
                         }]
                 };
             }
@@ -212,7 +212,7 @@ ${objectNames.map(name => `• ${name}`).join('\n')}
                 return {
                     content: [{
                             type: 'text',
-                            text: `❌ Could not retrieve room data for game ${gameId}`
+                            text: `Could not retrieve room data for game ${gameId}`
                         }]
                 };
             }
@@ -224,7 +224,7 @@ ${objectNames.map(name => `• ${name}`).join('\n')}
                 return {
                     content: [{
                             type: 'text',
-                            text: `🔍 **Objects in ${currentRoomData.name}**
+                            text: `**Objects in ${currentRoomData.name}**
 
 No objects found in this room.`
                         }]
@@ -234,10 +234,10 @@ No objects found in this room.`
                 const details = obj.details && Array.isArray(obj.details)
                     ? obj.details.map(detail => `    - ${detail}`).join('\n')
                     : '    - No additional details';
-                return `**${index + 1}. ${obj.name}** ${obj.unlocked ? '🔓' : '🔒'}
+                return `**${index + 1}. ${obj.name}** ${obj.unlocked ? 'Unlocked' : 'Locked'}
   **Description**: ${obj.description}
   **Puzzle**: ${obj.puzzle || 'No puzzle'}
-  **Answer**: ${obj.unlocked ? (obj.answer || 'No answer') : '🔒 Hidden'}
+  **Answer**: ${obj.unlocked ? (obj.answer || 'No answer') : 'Hidden'}
   **Status**: ${obj.unlocked ? 'Unlocked' : 'Locked'}
   **Details**:
 ${details}`;
@@ -245,7 +245,7 @@ ${details}`;
             return {
                 content: [{
                         type: 'text',
-                        text: `🔍 **All Objects in ${currentRoomData.name}** (${objects.length} total)
+                        text: `**All Objects in ${currentRoomData.name}** (${objects.length} total)
 
 ${objectsDetails}
 
@@ -259,7 +259,7 @@ ${objectsDetails}
             return {
                 content: [{
                         type: 'text',
-                        text: `❌ Error retrieving objects contents: ${error instanceof Error ? error.message : String(error)}`
+                        text: `Error retrieving objects contents: ${error instanceof Error ? error.message : String(error)}`
                     }]
             };
         }

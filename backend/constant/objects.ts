@@ -1,4 +1,5 @@
-import { RoomData } from "../agents/RoomAgent";
+import { MultiRoomGame } from "../agents/MultiRoomGame";
+import { RoomData, RoomAgent } from "../agents/RoomAgent";
 
 // constant/objects.ts
   
@@ -150,3 +151,40 @@ import { RoomData } from "../agents/RoomAgent";
       ]
     }
   };
+
+
+  // Game data interface for Firebase storage + User Game session
+  export interface GameData {
+    gameId: string;
+    userId: string;
+    gameMode: 'default' | 'single-custom' | 'multi-custom';
+    roomDetails: {
+        totalRooms: number;
+        rooms: Array<{
+            roomId: string | number;
+            name: string;
+            background?: string;
+            objects?: any[];
+            password?: string;
+            hint?: string;
+        }>;
+    };
+    startTime: string;
+    endTime?: string;
+    completed: boolean;
+    timeElapsed?: number; // in seconds
+    hintsUsed?: number;
+    createdAt: string;
+}
+
+export interface UserGameSession {
+  gameInstance: RoomAgent | MultiRoomGame;
+  gameMode: 'default' | 'single-custom' | 'multi-custom'; 
+  gameId: string | number; 
+  currentRoomName?: string;
+  currentRoomSequence?: number;
+  totalRooms?: number;
+  startTime?: Date; // Added for timer functionality
+  endTime?: Date;
+  hintsUsed?: number; // Track hints for leaderboard
+}

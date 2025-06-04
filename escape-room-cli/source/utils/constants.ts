@@ -44,6 +44,14 @@ export const COMMANDS: CommandCollection = {
 		description: 'Get the password of the current room',
 		usage: '/password [your_password]',
 	},
+	'/leaderboard': {
+		description: 'Shows the top 10 leaderboard scorers.',
+		usage: '/leaderboard',
+	},
+	'/leaderboard/me': {
+		description: 'Shows your top 5 scores.',
+		usage: '/leaderboard/me',
+	},
 	'/logout': {
 		description: 'Logout to current session and your account.',
 		usage: '/logout',

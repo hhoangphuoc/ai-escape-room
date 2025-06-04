@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getUserBestScores = exports.getLeaderboard = exports.saveScoreToLeaderboard = exports.emailExistsInFirebase = exports.getUserFromFirebase = exports.saveUserToFirebase = void 0;
+exports.getGameLeaderboard = exports.updateGameCompletion = exports.saveGameToFirebase = exports.getUserBestScores = exports.getLeaderboard = exports.saveScoreToLeaderboard = exports.emailExistsInFirebase = exports.getUserFromFirebase = exports.saveUserToFirebase = void 0;
 const admin = __importStar(require("firebase-admin"));
 const bcrypt = __importStar(require("bcrypt"));
 // Initialize Firebase Admin SDK
@@ -74,6 +74,7 @@ const db = firebaseInitialized ? admin.firestore() : null;
 // User collection reference
 const usersCollection = db?.collection('users');
 const leaderboardCollection = db?.collection('leaderboard');
+const gamesCollection = db?.collection('games');
 // Hash API key before storing (for security)
 const hashApiKey = (apiKey) => {
     return bcrypt.hashSync(apiKey, 10);
@@ -252,12 +253,109 @@ const getUserBestScores = async (userId, limit = 5) => {
     }
 };
 exports.getUserBestScores = getUserBestScores;
+// Game data interface for Firebase storage
+// Save game data to Firebase
+const saveGameToFirebase = async (gameData) => {
+    if (!gamesCollection) {
+        console.warn('Firebase not initialized. Game data not saved to cloud.');
+        return false;
+    }
+    try {
+        await gamesCollection.doc(gameData.gameId).set({
+            ...gameData,
+            timestamp: admin.firestore.FieldValue.serverTimestamp()
+        });
+        console.log(`Game ${gameData.gameId} saved to Firebase successfully`);
+        return true;
+    }
+    catch (error) {
+        console.error('Error saving game to Firebase:', error);
+        return false;
+    }
+};
+exports.saveGameToFirebase = saveGameToFirebase;
+// Update game completion data
+const updateGameCompletion = async (gameId, timeElapsed, hintsUsed) => {
+    if (!gamesCollection) {
+        console.warn('Firebase not initialized. Game completion not updated.');
+        return false;
+    }
+    try {
+        await gamesCollection.doc(gameId).update({
+            endTime: new Date().toISOString(),
+            completed: true,
+            timeElapsed,
+            hintsUsed,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+        console.log(`Game ${gameId} completion updated in Firebase`);
+        return true;
+    }
+    catch (error) {
+        console.error('Error updating game completion:', error);
+        return false;
+    }
+};
+exports.updateGameCompletion = updateGameCompletion;
+// Get leaderboard from games collection (top 10 fastest completed games)
+const getGameLeaderboard = async (gameMode, limit = 10) => {
+    if (!gamesCollection || !usersCollection) {
+        return [];
+    }
+    try {
+        let query = gamesCollection
+            .where('completed', '==', true)
+            .orderBy('timeElapsed', 'asc')
+            .limit(limit);
+        if (gameMode && gameMode !== 'all') {
+            query = query.where('gameMode', '==', gameMode);
+        }
+        const snapshot = await query.get();
+        const entries = [];
+        // Get user data for each game entry
+        for (let i = 0; i < snapshot.docs.length; i++) {
+            const doc = snapshot.docs[i];
+            const gameData = doc.data();
+            // Get username from users collection
+            let userName = 'Unknown User';
+            try {
+                const userDoc = await usersCollection.doc(gameData.userId).get();
+                if (userDoc.exists) {
+                    const userData = userDoc.data();
+                    userName = userData?.name || userName;
+                }
+            }
+            catch (error) {
+                console.error(`Error fetching user data for userId ${gameData.userId}:`, error);
+            }
+            entries.push({
+                userId: gameData.userId,
+                userName: userName,
+                gameId: gameData.gameId,
+                gameMode: gameData.gameMode,
+                timeElapsed: gameData.timeElapsed,
+                hintsUsed: gameData.hintsUsed || 0,
+                submittedAt: gameData.endTime || gameData.createdAt,
+                rank: i + 1
+            });
+        }
+        return entries;
+    }
+    catch (error) {
+        console.error('Error fetching game leaderboard:', error);
+        return [];
+    }
+};
+exports.getGameLeaderboard = getGameLeaderboard;
 exports.default = {
     saveUserToFirebase: exports.saveUserToFirebase,
     getUserFromFirebase: exports.getUserFromFirebase,
     emailExistsInFirebase: exports.emailExistsInFirebase,
     saveScoreToLeaderboard: exports.saveScoreToLeaderboard,
     getLeaderboard: exports.getLeaderboard,
-    getUserBestScores: exports.getUserBestScores
+    getUserBestScores: exports.getUserBestScores,
+    saveGameToFirebase: exports.saveGameToFirebase,
+    updateGameCompletion: exports.updateGameCompletion,
+    getGameLeaderboard: exports.getGameLeaderboard
 };
 //# sourceMappingURL=firebaseService.js.map

@@ -1,19 +1,19 @@
 // backend/api/routes/gameRoutes.ts
 import { Router, Response } from 'express';
-import { ROOM_OBJECTS } from '../../constant/objects'; 
+import { ROOM_OBJECTS, type GameData } from '../../constant/objects'; 
 import { RoomAgent, RoomData, RoomCommandResponse } from '../../agents/RoomAgent';
 import { MultiRoomGame } from '../../agents/MultiRoomGame'; 
 import { v4 as uuidv4 } from 'uuid';
 import { users } from '../auth/authController';
 import { jwtAuth, AuthRequest, UserJwtPayload } from '../auth/jwtMiddleware';
 import OpenAI from 'openai'; // Added OpenAI import
-import { saveScoreToLeaderboard, getLeaderboard as getFirebaseLeaderboard, getUserBestScores } from '../services/firebaseService';
+import { getUserBestScores, saveGameToFirebase, updateGameCompletion, getGameLeaderboard } from '../services/firebaseService';
 
 // TODO: Move UserGameSession and userActiveGames to a more central state management or service layer
 interface UserGameSession {
   gameInstance: RoomAgent | MultiRoomGame;
   gameMode: 'default' | 'single-custom' | 'multi-custom'; 
-  gameId: string | number; 
+  gameId: string | number;
   currentRoomName?: string;
   currentRoomSequence?: number;
   totalRooms?: number;
@@ -209,6 +209,17 @@ router.post('/password', async (req: AuthRequest, res: Response): Promise<void> 
         if (responseData.escaped && userSession.startTime) {
             userSession.endTime = new Date();
             responseData.timeElapsed = Math.floor((userSession.endTime.getTime() - userSession.startTime.getTime()) / 1000);
+            
+            // Update game completion in Firebase
+            if (userSession.gameId) {
+                updateGameCompletion(
+                    userSession.gameId.toString(),
+                    responseData.timeElapsed,
+                    userSession.hintsUsed || 0
+                ).catch(error => {
+                    console.error(`Failed to update game completion for ${userSession.gameId}:`, error);
+                });
+            }
         }
 
         if (responseData.gameCompleted) {
@@ -461,6 +472,35 @@ router.post('/newgame', async (req: AuthRequest, res: Response): Promise<void> =
             userActiveGames[userId] = newGameSession;
             console.log(`API: New game created for user ${userId}. Mode: [${actualGameMode}] - GameID: [${newGameSession.gameId}]`);
             
+            // Save game data to Firebase
+            const gameData: GameData = {
+                gameId: newGameSession.gameId.toString(),
+                userId: userId,
+                gameMode: actualGameMode,
+                roomDetails: {
+                    totalRooms: responseTotalRooms,
+                    rooms: [{
+                        roomId: initialRoomData.id,
+                        name: initialRoomData.name,
+                        background: initialRoomData.background,
+                        objects: Array.isArray(initialRoomData.objects) 
+                            ? initialRoomData.objects 
+                            : Object.values(initialRoomData.objects),
+                        password: initialRoomData.password,
+                        hint: initialRoomData.hint
+                    }]
+                },
+                startTime: newGameSession.startTime.toISOString(),
+                completed: false,
+                hintsUsed: 0,
+                createdAt: new Date().toISOString()
+            };
+
+            // Save to Firebase (async, don't wait for completion)
+            saveGameToFirebase(gameData).catch(error => {
+                console.error(`Failed to save game ${gameData.gameId} to Firebase:`, error);
+            });
+            
             // Enhanced logging for JSON response debugging
             console.log(`=========================== ROOM DATA GENERATED FOR ${actualGameMode.toUpperCase()} GAME ===========================`);
             console.log(`Room ID: ${initialRoomData.id}`);
@@ -584,134 +624,6 @@ router.get('/state', async (req: AuthRequest, res: Response): Promise<void> => {
 });
 //=========================================================================================================================
 
-// // GET /room/objects - List objects in the current room for a user
-// router.get('/room/objects', async (req: AuthRequest, res: Response): Promise<void> => {
-//     const userId = (req.user as UserJwtPayload).sub;
-//     console.log(`API: Received /room/objects request for user ${userId}`);
-
-//     const userSession = userActiveGames[userId];
-//     if (!userSession) {
-//         res.status(404).json({ error: "No active game found." });
-//         return;
-//     }
-//     const { gameInstance } = userSession;
-
-//     try {
-//         const result = await gameInstance.process('/look'); 
-//         const roomName = result.data?.room?.name || (
-//             gameInstance instanceof RoomAgent ? gameInstance.getRoomData()?.name : (
-//                 gameInstance instanceof MultiRoomGame ? gameInstance.getCurrentRoom().getRoomData()?.name : 'Unknown Room'
-//             )
-//         ) || 'Unknown Room';
-//         const objectNames: string[] = result.data?.objects || [];
-//         res.json({ roomName: roomName, objects: objectNames });
-//     } catch (error) {
-//         console.error(`[API Error] in /room/objects for user ${userId}:`, error);
-//         res.status(500).json({ error: "Failed to get room objects." });
-//     }
-// });
-
-// // GET /object/:object_name - Get details of a specific object for a user
-// router.get('/object/:object_name', async (req: AuthRequest, res: Response): Promise<void> => {
-//     const userId = (req.user as UserJwtPayload).sub;
-//     const objectNameParam = req.params.object_name;
-//     console.log(`API: Received /object/${objectNameParam} request for user ${userId}`);
-
-//     const userSession = userActiveGames[userId];
-//     if (!userSession) {
-//         res.status(404).json({ error: "No active game found." });
-//         return;
-//     }
-//     const { gameInstance } = userSession;
-//     try {
-//         const command = `/inspect ${objectNameParam}`;
-//         const result = await gameInstance.process(command);
-//         if (result.data?.object) {
-//             res.status(200).json(result.data.object);
-//         } else {
-//             res.status(404).json({ error: result.data?.message || `Object '${objectNameParam}' not found.` });
-//         }
-//     } catch (error) {
-//         console.error(`[API Error] in /object/${objectNameParam} for user ${userId}:`, error);
-//         res.status(500).json({ error: `Failed to get object details.` });
-//     }
-// });
-
-// // POST /room/unlock - Unlock a room for a user
-// router.post('/room/unlock', async (req: AuthRequest, res: Response): Promise<void> => {
-//     const userId = (req.user as UserJwtPayload).sub;
-//     const { password_guess } = req.body;
-//     console.log(`API: Received /room/unlock request for user ${userId}`);
-//     if (typeof password_guess !== 'string') {
-//         res.status(400).json({ error: 'Password guess must be a string.' });
-//         return;
-//     }
-//     const user = users[userId]; // Ensure user exists
-//     if (!user) {
-//         res.status(401).json({ error: 'User not found.' });
-//         return;
-//     }
-//     const userSession = userActiveGames[userId];
-//     if (!userSession) {
-//         res.status(404).json({ error: "No active game found." });
-//         return;
-//     }
-//     const { gameInstance, gameMode } = userSession;
-//     try {
-//         const command = `/guess ${password_guess}`;
-//         const result = await gameInstance.process(command);
-//         let responseData = {
-//             unlocked: result.data?.unlocked || false,
-//             finished: result.data?.gameCompleted || false, 
-//             message: result.data?.message || "Guess processed.",
-//             nextRoom: result.data?.nextRoom, 
-//             currentRoomName: userSession.currentRoomName, 
-//             currentRoom: userSession.currentRoomSequence,
-//             totalRooms: userSession.totalRooms
-//         };
-//         if (responseData.finished) {
-//             console.log(`API: Game finished for user ${userId}. Cleaning up session.`);
-//             delete userActiveGames[userId];
-//         } else if (responseData.unlocked) {
-//             if (gameInstance instanceof MultiRoomGame) {
-//                  userSession.currentRoomSequence = gameInstance.getCurrentRoomNumber();
-//                  userSession.totalRooms = gameInstance.getTotalRooms();
-//                  const currentRoomData = gameInstance.getCurrentRoom().getRoomData();
-//                  userSession.currentRoomName = currentRoomData?.name || 'Unknown Room';
-//                  responseData.currentRoomName = userSession.currentRoomName;
-//                  responseData.currentRoom = userSession.currentRoomSequence;
-//                  responseData.totalRooms = userSession.totalRooms;
-//             } else if (gameMode === 'default' && result.data?.nextRoom?.id) {
-//                 const nextDefaultRoomId = result.data.nextRoom.id as number;
-//                 const templateAgent = defaultRoomAgents[nextDefaultRoomId];
-//                 if (templateAgent) {
-//                     const nextDefaultRoomAgent = new RoomAgent(nextDefaultRoomId);
-//                     const nextRoomData = nextDefaultRoomAgent.getRoomData();
-//                     userActiveGames[userId] = { 
-//                         gameInstance: nextDefaultRoomAgent,
-//                         gameMode: 'default',
-//                         gameId: nextDefaultRoomId,
-//                         currentRoomName: nextRoomData?.name || 'Next Room',
-//                         currentRoomSequence: userSession.currentRoomSequence ? userSession.currentRoomSequence + 1 : nextDefaultRoomId, 
-//                         totalRooms: Object.keys(ROOM_OBJECTS).length
-//                     };
-//                     console.log(`API: User ${userId} progressing to default room ${nextDefaultRoomId}`);
-//                     responseData.currentRoomName = nextRoomData?.name;
-//                     responseData.currentRoom = userActiveGames[userId].currentRoomSequence;
-//                 } else {
-//                     console.log(`API: User ${userId} finished all default rooms.`);
-//                     responseData.finished = true; 
-//                     delete userActiveGames[userId];
-//                 }
-//             }
-//         }
-//         res.status(200).json(responseData);
-//     } catch (error) {
-//         console.error(`[API Error] in /room/unlock for user ${userId}:`, error);
-//         res.status(500).json({ error: "Failed to process unlock attempt." });
-//     }
-// });
-
 // POST /chat - Chat with the AI through own API Key
 router.post('/chat', async (req: AuthRequest, res: Response): Promise<void> => {
     const userId = (req.user as UserJwtPayload).sub;
@@ -785,22 +697,43 @@ router.post('/chat', async (req: AuthRequest, res: Response): Promise<void> => {
 //                                            LEADERBOARD FUNCTIONS
 //-----------------------------------------------------------------------------------------------------------------------------
 
-// GET /leaderboard - Get the game leaderboard
-router.get('/leaderboard', async (req: AuthRequest, res: Response): Promise<void> => {
+// // GET /leaderboard - Get the game leaderboard (from legacy leaderboard collection)
+// router.get('/leaderboard', async (req: AuthRequest, res: Response): Promise<void> => {
+//     const gameMode = req.query.mode as string || 'all';
+//     const limit = parseInt(req.query.limit as string) || 10;
+    
+//     console.log(`API: Received /leaderboard request for mode: ${gameMode}`);
+    
+//     try {
+//         const leaderboard = await getFirebaseLeaderboard(gameMode, limit);
+//         res.json({
+//             leaderboard,
+//             count: leaderboard.length,
+//             mode: gameMode,
+//             source: 'legacy'
+//         });
+//     } catch (error) {
+//         console.error(`[API Error] in /leaderboard:`, error);
+//         res.status(500).json({ error: "Failed to fetch leaderboard." });
+//     }
+// });
+
+// GET /leaderboard/games - Get the game leaderboard (from games collection)
+router.get('/leaderboard/games', async (req: AuthRequest, res: Response): Promise<void> => {
     const gameMode = req.query.mode as string || 'all';
     const limit = parseInt(req.query.limit as string) || 10;
     
-    console.log(`API: Received /leaderboard request for mode: ${gameMode}`);
+    console.log(`API: Received /leaderboard/games request for mode: ${gameMode}`);
     
     try {
-        const leaderboard = await getFirebaseLeaderboard(gameMode, limit);
+        const leaderboard = await getGameLeaderboard(gameMode, limit);
         res.json({
             leaderboard,
             count: leaderboard.length,
             mode: gameMode
         });
     } catch (error) {
-        console.error(`[API Error] in /leaderboard:`, error);
+        console.error(`[API Error] in /leaderboard/games:`, error);
         res.status(500).json({ error: "Failed to fetch leaderboard." });
     }
 });
@@ -825,50 +758,50 @@ router.get('/leaderboard/me', async (req: AuthRequest, res: Response): Promise<v
     }
 });
 
-// POST /leaderboard/submit - Submit a score to the leaderboard
-router.post('/leaderboard/submit', async (req: AuthRequest, res: Response): Promise<void> => {
-    const userId = (req.user as UserJwtPayload).sub;
-    const { gameId, timeElapsed, hintsUsed, gameMode } = req.body;
+// // POST /leaderboard/submit - Submit a score to the leaderboard
+// router.post('/leaderboard/submit', async (req: AuthRequest, res: Response): Promise<void> => {
+//     const userId = (req.user as UserJwtPayload).sub;
+//     const { gameId, timeElapsed, hintsUsed, gameMode } = req.body;
     
-    console.log(`API: Received leaderboard submission from user ${userId}`);
+//     console.log(`API: Received leaderboard submission from user ${userId}`);
     
-    if (!gameId || !timeElapsed) {
-        res.status(400).json({ error: 'GameId and timeElapsed are required.' });
-        return;
-    }
+//     if (!gameId || !timeElapsed) {
+//         res.status(400).json({ error: 'GameId and timeElapsed are required.' });
+//         return;
+//     }
     
-    const user = users[userId];
-    if (!user) {
-        res.status(401).json({ error: 'User not found.' });
-        return;
-    }
+//     const user = users[userId];
+//     if (!user) {
+//         res.status(401).json({ error: 'User not found.' });
+//         return;
+//     }
     
-    try {
-        const success = await saveScoreToLeaderboard({
-            userId,
-            userName: user.name,
-            gameId,
-            timeElapsed,
-            hintsUsed: hintsUsed || 0,
-            gameMode: gameMode || 'single-custom',
-            submittedAt: new Date().toISOString()
-        });
+//     try {
+//         const success = await saveScoreToLeaderboard({
+//             userId,
+//             userName: user.name,
+//             gameId,
+//             timeElapsed,
+//             hintsUsed: hintsUsed || 0,
+//             gameMode: gameMode || 'single-custom',
+//             submittedAt: new Date().toISOString()
+//         });
         
-        if (success) {
-            res.json({
-                success: true,
-                message: "Score submitted successfully to leaderboard"
-            });
-        } else {
-            res.json({
-                success: false,
-                message: "Score saved locally but Firebase sync failed"
-            });
-        }
-    } catch (error) {
-        console.error(`[API Error] in /leaderboard/submit:`, error);
-        res.status(500).json({ error: "Failed to submit score." });
-    }
-});
+//         if (success) {
+//             res.json({
+//                 success: true,
+//                 message: "Score submitted successfully to leaderboard"
+//             });
+//         } else {
+//             res.json({
+//                 success: false,
+//                 message: "Score saved locally but Firebase sync failed"
+//             });
+//         }
+//     } catch (error) {
+//         console.error(`[API Error] in /leaderboard/submit:`, error);
+//         res.status(500).json({ error: "Failed to submit score." });
+//     }
+// });
 
 export default router; 

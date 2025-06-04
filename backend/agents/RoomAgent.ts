@@ -33,10 +33,6 @@ export interface RoomCommandResponse {
     };
     gameCompleted?: boolean;    // Whether game is completed
     hint?: string;              // Hint for the password
-    // hint?: {                    // Hint information
-    //   source: string;           // Which object provided the hint
-    //   content: string;          // The hint content
-    // };
   };
   
   // Legacy fields for backward compatibility
