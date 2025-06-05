@@ -9,15 +9,30 @@ import ModelSelector from './ModelSelector.js';
 import McpClientUI from './McpClientUI.js';
 import { MODELS_COLLECTION, type ModelOption } from '../utils/constants.js';
 import { getApiUrl } from '../utils/apiConfig.js';
-import UserRegistration, { handleLogin } from './UserRegistration.js';
+import UserRegistration  from './UserRegistration.js';
+import { 
+    handleHelpCommand,
+    handleLookCommand,
+    handleInspectCommand,
+    handleGuessCommand,
+    handlePasswordCommand,
+    handleHintCommand,
+    handleNewGameCommand,
+    handleLeaderboardCommand,
+    handleLogoutCommand,
+    handleLoginCommand
+} from '../utils/commandHandlers.js';
+import { 
+    displayResponse,
+    // DisplayMode,
+    type HistoryItem
+} from '../utils/responseDisplay.js';
+import { 
+    UserContext, 
+    GameContext 
+} from '../utils/responseTypes.js';
 
-// FOR LOGOUT ----------------------------------------------------------------------------------------
-import fs from 'fs'; // For logout config clear
-import path from 'path'; // For logout config clear
-import os from 'os'; // For logout config clear
-
-const USER_CONFIG_FILE = path.join(os.homedir(), '.escape-room-config.json'); // For logout
-// --------------------------------------------------------------------------------------------------
+// // --------------------------------------------------------------------------------------------------
 interface TerminalProps {
 	// mode: 'standard' | 'mcp';
 	// These initial props might be less relevant if UserRegistration handles initial load
@@ -25,32 +40,27 @@ interface TerminalProps {
 	// userId?: string;
 }
 
-// Define type for history items
-type HistoryItem = {
-	type: 'command' | 'response';
-	text: string;
-};
 
 // Structure expected from backend game endpoints (subset)
-interface GameInfo {
-    id?: string | number;
-    name?: string;
-    background?: string;
-    currentRoom?: number; // Sequence number
-    totalRooms?: number;
-    mode?: string;
-    objectCount?: number;
-}
+// interface GameInfo {
+//     id?: string | number;
+//     name?: string;
+//     background?: string;
+//     currentRoom?: number; // Sequence number
+//     totalRooms?: number;
+//     mode?: string;
+//     objectCount?: number;
+// }
 
 const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: initialUserId }*/) => {
-	const [history, setHistory] = useState<Array<HistoryItem>>([]);
+	const [history, setHistory] = useState<HistoryItem[]>([]);
 	const [currentCommand, setCurrentCommand] = useState('');
 	const [isConnected, setIsConnected] = useState(false);
 	const [showHistory, setShowHistory] = useState(false);
+    const [loadingMessage, setLoadingMessage] = useState('');
 	const [isLoadingGame, setIsLoadingGame] = useState(false);
 	const [isProcessingCommand, setIsProcessingCommand] = useState(false);
-	const [loadingMessage, setLoadingMessage] = useState('');
-	const [hasAICapability, setHasAICapability] = useState<boolean>(false); // Determined by presence of API key in state
+	const [hasAICapability] = useState<boolean>(false); // Determined by presence of API key in state
 	const [showModelSelector, setShowModelSelector] = useState(false);
 	const [selectedModel, setSelectedModel] = useState<ModelOption>(Object.values(MODELS_COLLECTION)[0] as ModelOption);
 
@@ -72,17 +82,6 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
     const [unlockedObjects, setUnlockedObjects] = useState<Array<string>>([]);
     const [currentRoomObjects, setCurrentRoomObjects] = useState<Array<string>>([]); //TODO: Fetch list of objects names from the backend
     const [totalRooms, setTotalRooms] = useState<number>(1);
-
-	useEffect(() => {
-		setHasAICapability(!!cliApiKey || !!process.env['OPENAI_API_KEY'] || !!process.env['ANTHROPIC_API_KEY']); // AI capability now depends on the session's API key state
-	}, [cliApiKey]);
-
-    useEffect(() => {
-        if (userId && sessionToken) {
-            fetchGameState();
-        }
-    }, [userId, sessionToken]);
-    
     //-------------------------------------------------------------------------------------------------
 
 	const checkBackendConnection = async () => {
@@ -252,8 +251,6 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 			body: JSON.stringify({ 
 			    message: text,
 			    model: selectedModel.value,
-                // No userId here, backend gets it from token
-                // No apiKey here, backend uses user's stored key
 			}),
 		});
 
@@ -271,200 +268,168 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 		}
 	};
 
-    //-------------------------------------------------------------------------------------------------
-	// 				COMMAND HELPER FUNCTION
-	//-------------------------------------------------------------------------------------------------
-    // TODO: Use this + Select Input for easier command selection
-    // const HELP_COMMANDS = [
-    //     '/help - Show help message',
-    //     '/newgame [single-room|multi-room] - Start a new AI-generated game',
-    //     '/look - Look around the room',
-    //     '/inspect [object] - Inspect an object',
-    //     '/guess [object] [answer] - Guess the puzzle answer for an object',
-    //     '/password [password] - Submit the password to unlock the door',
-    //     '/hint - Get a hint about the password',
-    //     '/logout - End your current session',
-    //     '/history - Show command history',
-    //     '/model - Change AI model (if AI enabled)',
-    //     // '/mcp - Switch to MCP client mode (NOT IMPLEMENTED YET)',
-    //     // ...(hasAICapability ? [`Current AI model: ${selectedModel.label}`] : []),
-    // ]; 
+    // Helper function to create user and game context for help handlers
+	const createUserContext = (): UserContext => ({
+		userId,
+		sessionToken,
+		userName,
+		cliApiKey,
+		hasAICapability,
+		selectedModel
+	});
 
-    // `/help` command
-	const handleHelpCommand = () => {
-		return [
-		'Available commands:',
-		'/help - Show help message',
-        ...(sessionToken ? [
-			'/newgame [single-room|multi-room] - Start a new AI-generated game',
-            '/look - Look around the room',
-            '/inspect [object] - Inspect an object',
-            '/guess [object] [answer] - Guess the puzzle answer for an object',
-			'/password [password] - Submit the password to unlock the door',
-            '/hint - Get a hint about the password',
-            '/leaderboard - View the top 10 players on the leaderboard',
-            '/logout - End your current session',
-        ] : [
-            '/register - Start the registration process (or use CLI flags)',
-            '/login - Login to the new game (if config exists, loaded automatically)',
-        ]),
-		'/history - Show command history',
-		'/model - Change AI model (if AI enabled)',
-		// '/mcp - Switch to MCP client mode (NOT IMPLEMENTED YET)',
-
-		...(hasAICapability ? [
-			`Current AI model: ${selectedModel.label}`
-		] : []),
-        ...(sessionToken && currentRoomName !== 'Loading...' ? [
-            `Current Room: "${currentRoomName}" (${currentGameMode})`
-        ] : [
-            'Not currently in a game session.'
-        ]),
-		].join('\n');
-	};
+	const createGameContext = (): GameContext => ({
+		currentGameId,
+		currentRoomName,
+		currentRoomBackground,
+		currentGameMode,
+		totalRooms,
+		unlockedObjects,
+		currentRoomObjects
+	});
     //-------------------------------------------------------------------------------------------------
 
-	// `/newgame [mode]`
-	async function handleGenerateNewGame(mode: string = 'single-room'): Promise<string> {
-        const requestedMode = (mode === 'multi-room') ? 'multi-room' : 'single-room';
-        const apiUrl = getApiUrl();
-        if (!sessionToken) {
-            return "Error: Not authenticated. Please login or register.";
-        }
-		try {
-			setIsLoadingGame(true);
-			setLoadingMessage(`Preparing an AI-generated [${requestedMode}] Escape Game...`);
-			const response = await fetch(`${apiUrl}/api/game/newgame`, {
-				method: 'POST',
-				headers: { 
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${sessionToken}`
-                },
-                body: JSON.stringify({ mode: requestedMode }) // No userId in body
-			});
-			const data = await response.json() as any; //FIXME: as { success: boolean; game: GameInfo };
+	// // `/newgame [mode]`
+	// async function handleGenerateNewGame(mode: string = 'single-room'): Promise<string> {
+    //     const requestedMode = (mode === 'multi-room') ? 'multi-room' : 'single-room';
+    //     const apiUrl = getApiUrl();
+    //     if (!sessionToken) {
+    //         return "Error: Not authenticated. Please login or register.";
+    //     }
+	// 	try {
+	// 		setIsLoadingGame(true);
+	// 		setLoadingMessage(`Preparing an AI-generated [${requestedMode}] Escape Game...`);
+	// 		const response = await fetch(`${apiUrl}/api/game/newgame`, {
+	// 			method: 'POST',
+	// 			headers: { 
+    //                 'Content-Type': 'application/json',
+    //                 'Authorization': `Bearer ${sessionToken}`
+    //             },
+    //             body: JSON.stringify({ mode: requestedMode }) // No userId in body
+	// 		});
+	// 		const data = await response.json() as any; //FIXME: as { success: boolean; game: GameInfo };
 			
-			// Enhanced logging for debugging
-			console.log('=== CLI: api/game/newgame RESPONSE RECEIVED ===');
-			console.log(JSON.stringify(data, null, 2));
+	// 		// Enhanced logging for debugging
+	// 		console.log('=== CLI: api/game/newgame RESPONSE RECEIVED ===');
+	// 		console.log(JSON.stringify(data, null, 2));
 			
-			if (data.success && data.game) {
-                const gameInfo: GameInfo = data.game;
+	// 		if (data.success && data.game) {
+    //             const gameInfo: GameInfo = data.game;
                 
-                // Check if roomData is included in the response
-                if (data.game.roomData) {
-                    console.log('=== CLI: ROOM DATA RECEIVED ===');
-                    console.log(`Room Name: ${data.game.roomData.name}`);
-                    console.log(`Room Password: ${data.game.roomData.password}`);
-                    console.log(`Room Hint: ${data.game.roomData.hint || 'No hint available'}`);
-                    console.log(`Room Escape Status: ${data.game.roomData.escape}`);
-                    console.log(`Objects:`, data.game.roomData.objects);
+    //             // Check if roomData is included in the response
+    //             if (data.game.roomData) {
+    //                 console.log('=== CLI: ROOM DATA RECEIVED ===');
+    //                 console.log(`Room Name: ${data.game.roomData.name}`);
+    //                 console.log(`Room Password: ${data.game.roomData.password}`);
+    //                 console.log(`Room Hint: ${data.game.roomData.hint || 'No hint available'}`);
+    //                 console.log(`Room Escape Status: ${data.game.roomData.escape}`);
+    //                 console.log(`Objects:`, data.game.roomData.objects);
                     
-                    if (Array.isArray(data.game.roomData.objects)) {
-                        console.log(`=== CLI: OBJECTS STRUCTURE ===`);
-                        data.game.roomData.objects.forEach((obj: any, index: number) => {
-                            console.log(`Object ${index + 1}:`);
-                            console.log(`  Name: ${obj.name}`);
-                            console.log(`  Description: ${obj.description}`);
-                            console.log(`  Puzzle: ${obj.puzzle || 'NO PUZZLE'}`);
-                            console.log(`  Answer: ${obj.answer || 'NO ANSWER'}`);
-                            console.log(`  Lock: ${obj.lock}`);
-                        });
-                    }
-                }
+    //                 if (Array.isArray(data.game.roomData.objects)) {
+    //                     console.log(`=== CLI: OBJECTS STRUCTURE ===`);
+    //                     data.game.roomData.objects.forEach((obj: any, index: number) => {
+    //                         console.log(`Object ${index + 1}:`);
+    //                         console.log(`  Name: ${obj.name}`);
+    //                         console.log(`  Description: ${obj.description}`);
+    //                         console.log(`  Puzzle: ${obj.puzzle || 'NO PUZZLE'}`);
+    //                         console.log(`  Answer: ${obj.answer || 'NO ANSWER'}`);
+    //                         console.log(`  Lock: ${obj.lock}`);
+    //                     });
+    //                 }
+    //             }
                 
-				// Update state based on response
-                setCurrentGameId(gameInfo.id || null);
-				setCurrentRoomName(gameInfo.name || 'Untitled Room');
-				setCurrentRoomBackground(gameInfo.background || 'No description provided.');
-                setCurrentGameMode(gameInfo.mode === 'multi-room' ? 'multi-custom' : 'single-custom');
-                setTotalRooms(gameInfo.totalRooms || 1);
+	// 			// Update state based on response
+    //             setCurrentGameId(gameInfo.id || null);
+	// 			setCurrentRoomName(gameInfo.name || 'Untitled Room');
+	// 			setCurrentRoomBackground(gameInfo.background || 'No description provided.');
+    //             setCurrentGameMode(gameInfo.mode === 'multi-room' ? 'multi-custom' : 'single-custom');
+    //             setTotalRooms(gameInfo.totalRooms || 1);
 
-				return `
-					New ${gameInfo.mode || 'custom'} game created successfully!
-					\nRoom ${gameInfo.currentRoom || 1}${gameInfo.totalRooms && gameInfo.totalRooms > 1 ? ` of ${gameInfo.totalRooms}` : ''}: ${gameInfo.name}
-					\n${gameInfo.background || ""}
-					\nThis room contains ${gameInfo.objectCount !== undefined ? gameInfo.objectCount : '?'} objects. Use /look to see them.
-					${data.game.roomData?.hint ? `\nHint: ${data.game.roomData.hint}` : ''}
-					\nPassword needed to escape. Use /password [your_guess] when ready!
-					`;
-			} else {
-			    console.error('=== CLI: NEWGAME FAILED ===');
-			    console.log('Response data:', data);
-				return `Failed to create new game: ${data.error || "Unknown error"}`;
-			}
-		} catch (error) {
-		    console.error('=== CLI: NEWGAME NETWORK ERROR ===');
-		    console.error(error);
-			setIsConnected(false);
-			return 'Error communicating with the server.';
-		} finally {
-			setIsLoadingGame(false);
-			setLoadingMessage('');
-		}
-	}
+	// 			return `
+	// 				New ${gameInfo.mode || 'custom'} game created successfully!
+	// 				\nRoom ${gameInfo.currentRoom || 1}${gameInfo.totalRooms && gameInfo.totalRooms > 1 ? ` of ${gameInfo.totalRooms}` : ''}: ${gameInfo.name}
+	// 				\n${gameInfo.background || ""}
+	// 				\nThis room contains ${gameInfo.objectCount !== undefined ? gameInfo.objectCount : '?'} objects. Use /look to see them.
+	// 				${data.game.roomData?.hint ? `\nHint: ${data.game.roomData.hint}` : ''}
+	// 				\nPassword needed to escape. Use /password [your_guess] when ready!
+	// 				`;
+	// 		} else {
+	// 		    console.error('=== CLI: NEWGAME FAILED ===');
+	// 		    console.log('Response data:', data);
+	// 			return `Failed to create new game: ${data.error || "Unknown error"}`;
+	// 		}
+	// 	} catch (error) {
+	// 	    console.error('=== CLI: NEWGAME NETWORK ERROR ===');
+	// 	    console.error(error);
+	// 		setIsConnected(false);
+	// 		return 'Error communicating with the server.';
+	// 	} finally {
+	// 		setIsLoadingGame(false);
+	// 		setLoadingMessage('');
+	// 	}
+	// }
 
 
     // -------------------------------------------------------------------------------------------------
     // `/logout` command
-    async function handleLogout() {
-        setUserId(undefined);
-        setSessionToken(undefined);
-        setUserName(undefined);
-        setCliApiKey(undefined); // Clear session API key
-        setCurrentGameId(null);
-        setCurrentRoomBackground('You have been logged out. Type /register or /login');
-        setCurrentGameMode('unknown');
-		setTotalRooms(0);
-        return "Logged out successfully.";
-    }
+    // async function handleLogout() {
+    //     setUserId(undefined);
+    //     setSessionToken(undefined);
+    //     setUserName(undefined);
+    //     setCliApiKey(undefined); // Clear session API key
+    //     setCurrentGameId(null);
+    //     setCurrentRoomBackground('You have been logged out. Type /register or /login');
+    //     setCurrentGameMode('unknown');
+	// 	setTotalRooms(0);
+    //     return "Logged out successfully.";
+    // }
 
 
     // -------------------------------------------------------------------------------------------------
-    // `/login` command
-	async function handleCliLogin() {
-		let configUserId: string | undefined;
-		let configApiKey: string | undefined;
-		let configProvider: 'openai' | 'anthropic' = 'openai';
+    // // `/login` command
+	// async function handleCliLogin() {
+	// 	let configUserId: string | undefined;
+	// 	let configApiKey: string | undefined;
+	// 	let configProvider: 'openai' | 'anthropic' = 'openai';
 		
-		if (fs.existsSync(USER_CONFIG_FILE)) {
-			const config = JSON.parse(fs.readFileSync(USER_CONFIG_FILE, 'utf-8'));
-			configUserId = config.userId;
-			setUserId(config.userId);
-			setUserName(config.name);
+	// 	if (fs.existsSync(USER_CONFIG_FILE)) {
+	// 		const config = JSON.parse(fs.readFileSync(USER_CONFIG_FILE, 'utf-8'));
+	// 		configUserId = config.userId;
+	// 		setUserId(config.userId);
+	// 		setUserName(config.name);
 			
-			// Get API key from config
-			if (config.apiKeys?.openai) {
-				configApiKey = config.apiKeys.openai;
-				configProvider = 'openai';
-			} else if (config.apiKeys?.anthropic) {
-				configApiKey = config.apiKeys.anthropic;
-				configProvider = 'anthropic';
-			}
-			setCliApiKey(configApiKey);
-		}
+	// 		// Get API key from config
+	// 		if (config.apiKeys?.openai) {
+	// 			configApiKey = config.apiKeys.openai;
+	// 			configProvider = 'openai';
+	// 		} else if (config.apiKeys?.anthropic) {
+	// 			configApiKey = config.apiKeys.anthropic;
+	// 			configProvider = 'anthropic';
+	// 		}
+	// 		setCliApiKey(configApiKey);
+	// 	}
 		
-		if (configUserId) {
-            console.log('=== CLI: Manual login attempt ===');
-            console.log('UserId:', configUserId);
-            console.log('API Key available:', !!configApiKey);
-            console.log('Provider:', configProvider);
+	// 	if (configUserId) {
+    //         console.log('=== CLI: Manual login attempt ===');
+    //         console.log('UserId:', configUserId);
+    //         console.log('API Key available:', !!configApiKey);
+    //         console.log('Provider:', configProvider);
             
-            const loginResponse = await handleLogin(configUserId, configApiKey, configProvider);
-            const loginData = await loginResponse.json() as any; //FIXME: as { token: string; error?: string };
-            if (loginResponse.ok && loginData.token) {
-                setSessionToken(loginData.token);
-                return "Logged in successfully.";
-            } else {
-                setCurrentRoomName('Login Error');
-                return `Login failed: ${loginData.error || 'Unknown error'}`;
-            }
-		} else {
-			setCurrentRoomName('Login Error');
-			setCurrentRoomBackground('Could not login. Please check your credentials and try again.');
-			return "Login Error: No user ID found.";
-		}
-	}
+    //         const loginResponse = await handleLogin(configUserId, configApiKey, configProvider);
+    //         const loginData = await loginResponse.json() as any; //FIXME: as { token: string; error?: string };
+    //         if (loginResponse.ok && loginData.token) {
+    //             setSessionToken(loginData.token);
+    //             return "Logged in successfully.";
+    //         } else {
+    //             setCurrentRoomName('Login Error');
+    //             return `Login failed: ${loginData.error || 'Unknown error'}`;
+    //         }
+	// 	} else {
+	// 		setCurrentRoomName('Login Error');
+	// 		setCurrentRoomBackground('Could not login. Please check your credentials and try again.');
+	// 		return "Login Error: No user ID found.";
+	// 	}
+	// }
     //-------------------------------------------------------------------------------------------------
 
 
@@ -510,189 +475,98 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                     response = "Unknown command.";
                 } else {
                     switch (cmd) {
-                        case '/help': response = handleHelpCommand(); break;
-                        case '/logout': response = await handleLogout(); break;
-                        case '/login': response = await handleCliLogin(); break;
+                        case '/help': {
+                            const helpResponse = handleHelpCommand(createUserContext(), createGameContext());
+                            const displayItems = displayResponse(helpResponse);
+                            setHistory(prev => [...prev, ...displayItems]);
+                            return;
+                        }
+                        case '/logout': {
+                            const logoutResponse = handleLogoutCommand();
+                            const displayItems = displayResponse(logoutResponse);
+                            setHistory(prev => [...prev, ...displayItems]);
+                            // Clear user state after logout
+                            setUserId(undefined);
+                            setSessionToken(undefined);
+                            setUserName(undefined);
+                            setCliApiKey(undefined);
+                            setCurrentGameId(null);
+                            setCurrentRoomBackground('You have been logged out. Type /register or /login');
+                            setCurrentGameMode('unknown');
+                            setTotalRooms(0);
+                            return;
+                        }
+                        case '/login': {
+                            const loginResponse = await handleLoginCommand();
+                            const displayItems = displayResponse(loginResponse);
+                            setHistory(prev => [...prev, ...displayItems]);
+                            if (loginResponse.success && loginResponse.userData) {
+                                setUserId(loginResponse.userData.userId);
+                                setUserName(loginResponse.userData.userName);
+                                setSessionToken(loginResponse.userData.token);
+                                setCliApiKey(loginResponse.userData.apiKey);
+                                fetchGameState();
+                            }
+                            return;
+                        }
                         case '/register':
                              response = "To register, please restart the application without a saved session, or use CLI flags.";
                              break;
                         // Protected commands below - require sessionToken
-                        case '/look':
-                            if (!sessionToken) {
-                                response = "You are not in a game session. Please login first.";
-                            } else {
-                                // Use the new GET /look endpoint
-                                const apiUrl = getApiUrl();
-                                try {
-                                    const lookResponse = await fetch(`${apiUrl}/api/game/look`, {
-                                        headers: { 'Authorization': `Bearer ${sessionToken}` }
-                                    });
-                                    if (lookResponse.ok) {
-                                        const data = await lookResponse.json() as any; //FIXME: as { message: string; roomName: string; objects: string[] };
-                                        
-                                        console.log('=== CLI: /look RESPONSE RECEIVED ===');
-                                        console.log(JSON.stringify(data, null, 2));
-                                        
-                                        response = data.message || `Room: ${data.roomName}\nObjects: ${data.objects.join(', ')}`;
-                                        
-                                        // Update current room name if provided
-                                        if (data.roomName) {
-                                            setCurrentRoomName(data.roomName);
-                                        }
-                                    } else {
-                                        const errorData = await lookResponse.json() as any;
-                                        console.error('=== CLI: /look ERROR ===');
-                                        console.log(JSON.stringify(errorData, null, 2));
-                                        response = errorData.error || "Failed to look around.";
-                                    }
-                                } catch (error) {
-                                    console.error('=== CLI: /look NETWORK ERROR ===');
-                                    console.error(error);
-                                    response = "Error: Could not look around.";
+                        case '/look': {
+                            const lookResponse = await handleLookCommand(createUserContext());
+                            const displayItems = displayResponse(lookResponse);
+                            setHistory(prev => [...prev, ...displayItems]);
+                            
+                            // Update room state if successful
+                            if (lookResponse.success && lookResponse.roomData.name) {
+                                setCurrentRoomName(lookResponse.roomData.name);
+                                setCurrentRoomObjects(lookResponse.roomData.objects);
+                            }
+                            return;
+                        }
+                        case '/inspect': {
+                            const objectName = parts.length >= 2 ? parts.slice(1).join(' ') : '';
+                            const inspectResponse = await handleInspectCommand(objectName, createUserContext());
+                            const displayItems = displayResponse(inspectResponse);
+                            setHistory(prev => [...prev, ...displayItems]);
+                            return;
+                        }
+                        case '/guess': {
+                            const objectName = parts.length >= 2 ? parts[1] || '' : '';
+                            const answer = parts.length >= 3 ? parts.slice(2).join(' ') : '';
+                            const guessResponse = await handleGuessCommand(objectName, answer, createUserContext());
+                            const displayItems = displayResponse(guessResponse);
+                            setHistory(prev => [...prev, ...displayItems]);
+                            
+                            // Update unlocked objects if successful
+                            if (guessResponse.success && guessResponse.objectData.unlocked) {
+                                setUnlockedObjects(prev => [...prev, guessResponse.objectData.name]);
+                            }
+                            return;
+                        }
+                        case '/password': {
+                            const password = parts.length >= 2 ? parts.slice(1).join(' ') : '';
+                            const passwordResponse = await handlePasswordCommand(password, createUserContext());
+                            const displayItems = displayResponse(passwordResponse);
+                            setHistory(prev => [...prev, ...displayItems]);
+                            
+                            // Update game state if password was correct
+                            if (passwordResponse.success && passwordResponse.gameResult.escaped) {
+                                if (passwordResponse.gameResult.gameCompleted) {
+                                    setCurrentRoomName('Congratulations!');
+                                    setCurrentRoomBackground('Game Completed. You can start try out with a new game [/newgame] or [/logout] to end your session.');
+                                    setCurrentGameId(null);
                                 }
                             }
-                            break;
-                        case '/inspect': 
-                            if (!sessionToken) {
-                                response = "You are not in a game session. Please login first.";
-                            } else if (parts.length < 2) {
-                                response = 'Usage: /inspect [object]';
-                            } else {
-                                // Use the new GET /inspect endpoint
-                                const objectName = parts.slice(1).join(' ');
-                                const apiUrl = getApiUrl();
-                                try {
-                                    const inspectResponse = await fetch(`${apiUrl}/api/game/inspect?object=${encodeURIComponent(objectName)}`, {
-                                        headers: { 'Authorization': `Bearer ${sessionToken}` }
-                                    });
-                                    const data = await inspectResponse.json() as any; //FIXME: as { message: string; error: string; object: any };
-                                    
-                                    console.log('=== CLI: /inspect RESPONSE RECEIVED ===');
-                                    console.log(`Object: ${objectName}`);
-                                    console.log(JSON.stringify(data, null, 2));
-                                    
-                                    if (inspectResponse.ok) {
-                                        response = data.message || `Inspecting ${objectName}...`;
-                                        
-                                        // If object data is available, show additional info
-                                        if (data.object) {
-                                            console.log('=== CLI: OBJECT DETAILS ===');
-                                            console.log(`Name: ${data.object.name}`);
-                                            console.log(`Description: ${data.object.description}`);
-                                            console.log(`Puzzle: ${data.object.puzzle || 'No puzzle info'}`);
-                                            console.log(`Answer: ${data.object.answer || 'No answer info'}`);
-                                            console.log(`Lock: ${data.object.lock}`);
-                                        }
-                                    } else {
-                                        response = data.error || `Could not inspect ${objectName}.`;
-                                    }
-                                } catch (error) {
-                                    console.error('=== CLI: /inspect NETWORK ERROR ===');
-                                    console.error(error);
-                                    response = "Error: Could not inspect object.";
-                                }
-                            }
-                            break;
-                        case '/guess':
-                            if (!sessionToken) {
-                                response = "You are not in a game session. Please login first.";
-                            } else if (parts.length < 3) {
-                                response = 'Usage: /guess [object] [answer]';
-                            } else {
-                                // Parse object and answer from command
-                                const objectName = parts[1] || '';
-                                const answer = parts.slice(2).join(' ');
-                                const apiUrl = getApiUrl();
-                                try {
-                                    const guessResponse = await fetch(`${apiUrl}/api/game/guess?object=${encodeURIComponent(objectName)}&answer=${encodeURIComponent(answer)}`, {
-                                        method: 'POST',
-                                        headers: { 
-                                            'Authorization': `Bearer ${sessionToken}`,
-                                            'Content-Type': 'application/json'
-                                        }
-                                    });
-                                    const data = await guessResponse.json() as any; //FIXME: as { message: string; correct: boolean };
-                                    console.log('=== CLI: /guess RESPONSE RECEIVED ===');
-                                    console.log(JSON.stringify(data, null, 2));
-
-                                    if (guessResponse.ok && data.object) {
-                                        response = data.message;
-                                        if (data.object.unlocked) {
-                                            setUnlockedObjects(prev => [...prev, data.object.name]);
-                                        }
-                                    } else {
-                                        response = data.error || "Failed to guess.";
-                                    }
-                                } catch (error) {
-                                    response = "Error: Could not process guess.";
-                                }
-                            }
-                            break;
-                        case '/password':
-                            if (!sessionToken) {
-                                response = "You are not in a game session. Please login first.";
-                            } else if (parts.length < 2) {
-                                response = 'Usage: /password [password]';
-                            } else {
-                                const password = parts.slice(1).join(' ');
-                                const apiUrl = getApiUrl();
-                                try {
-                                    const passwordResponse = await fetch(`${apiUrl}/api/game/password?password=${encodeURIComponent(password)}`, {
-                                        method: 'POST',
-                                        headers: { 
-                                            'Authorization': `Bearer ${sessionToken}`,
-                                            'Content-Type': 'application/json'
-                                        }
-                                    });
-                                    const data = await passwordResponse.json() as any; //FIXME: as { message: string; escaped: boolean; timeElapsed: number; gameCompleted: boolean };
-                                    if (data.escaped) {
-                                        response = data.message + (data.timeElapsed ? `\nTime: ${data.timeElapsed} seconds` : '');
-                                        if (data.gameCompleted) {
-                                            setCurrentRoomName('Congratulations!');
-                                            setCurrentRoomBackground('Game Completed. You can start try out with a new game [/newgame] or [/logout] to end your session.');
-                                            setCurrentGameId(null);
-                                        }
-                                    } else {
-                                        response = data.message || "Wrong password.";
-                                    }
-                                } catch (error) {
-                                    response = "Error: Could not check password.";
-                                }
-                            }
-                            break;
-                        case '/hint': 
-                            if (!sessionToken) {
-                                response = "You are not in a game session. Please login first.";
-                            } else {
-                                const apiUrl = getApiUrl();
-                                try {
-                                    const hintResponse = await fetch(`${apiUrl}/api/game/hint`, {
-                                        headers: { 'Authorization': `Bearer ${sessionToken}` }
-                                    });
-                                    const data = await hintResponse.json() as any; //FIXME: as { hint: string };
-                                    
-                                    console.log('=== CLI: /hint RESPONSE RECEIVED ===');
-                                    console.log(JSON.stringify(data, null, 2));
-                                    
-                                    // Ensure response is always a string
-                                    if (typeof data.hint === 'string') {
-                                        response = data.hint || "No hints available.";
-                                    } else if (data.hint) {
-                                        // If hint is an object or array, stringify it
-                                        response = JSON.stringify(data.hint, null, 2);
-                                    } else if (data.message) {
-                                        // Check if there's a message field instead
-                                        response = typeof data.message === 'string' ? data.message : JSON.stringify(data.message, null, 2);
-                                    } else {
-                                        response = "No hints available.";
-                                    }
-                                } catch (error) {
-                                    console.error('=== CLI: /hint ERROR ===');
-                                    console.error(error);
-                                    response = "Error: Could not get hint.";
-                                }
-                            }
-                            break;
+                            return;
+                        }
+                        case '/hint': {
+                            const hintResponse = await handleHintCommand(createUserContext());
+                            const displayItems = displayResponse(hintResponse);
+                            setHistory(prev => [...prev, ...displayItems]);
+                            return;
+                        }
                         case '/restart':
                             if (!sessionToken) {
                                 response = "You are not in a game session. Please login first.";
@@ -718,52 +592,33 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
                                 }
                             }
                             break;
-                        case '/newgame': response = sessionToken ? await handleGenerateNewGame(parts[1]?.toLowerCase()) : "You are not in a game session. Please login first."; break;
-                        case '/status': response = sessionToken ? await sendCommand('/status') : "You are not in a game session. Please login first."; break;
-                        case '/leaderboard':
-                            if (!sessionToken) {
-                                response = "You are not in a game session. Please login first.";
-                            } else {
-                                const apiUrl = getApiUrl();
-                                try {
-                                    const leaderboardResponse = await fetch(`${apiUrl}/api/game/leaderboard/games`, {
-                                        headers: { 'Authorization': `Bearer ${sessionToken}` }
-                                    });
-                                    if (leaderboardResponse.ok) {
-                                        const data = await leaderboardResponse.json() as any;
-                                        
-                                        console.log('=== CLI: /leaderboard RESPONSE RECEIVED ===');
-                                        console.log(JSON.stringify(data, null, 2));
-                                        
-                                        if (data.leaderboard && data.leaderboard.length > 0) {
-                                            let leaderboardText = "🏆 TOP 10 LEADERBOARD 🏆\n\n";
-                                            leaderboardText += "Rank | Player | Time | Hints | Mode\n";
-                                            leaderboardText += "─────┼────────┼──────┼───────┼─────────\n";
-                                            
-                                            data.leaderboard.forEach((entry: any, index: number) => {
-                                                const rank = (index + 1).toString().padStart(4, ' ');
-                                                const player = entry.userName.substring(0, 8).padEnd(8, ' ');
-                                                const time = `${entry.timeElapsed}s`.padEnd(6, ' ');
-                                                const hints = entry.hintsUsed.toString().padStart(5, ' ');
-                                                const mode = entry.gameMode.substring(0, 9).padEnd(9, ' ');
-                                                leaderboardText += `${rank} │ ${player} │ ${time} │${hints} │ ${mode}\n`;
-                                            });
-                                            
-                                            response = leaderboardText;
-                                        } else {
-                                            response = "No completed games found on the leaderboard yet. Be the first to complete a game!";
-                                        }
-                                    } else {
-                                        const errorData = await leaderboardResponse.json() as any;
-                                        response = errorData.error || "Failed to fetch leaderboard.";
-                                    }
-                                } catch (error) {
-                                    console.error('=== CLI: /leaderboard NETWORK ERROR ===');
-                                    console.error(error);
-                                    response = "Error: Could not fetch leaderboard.";
-                                }
+                        case '/newgame': {
+                            const mode = parts[1]?.toLowerCase() || 'single-room';
+                            setIsLoadingGame(true);
+                            setLoadingMessage(`Preparing an AI-generated [${mode}] Escape Game...`);
+                            const newGameResponse = await handleNewGameCommand(mode, createUserContext());
+                            const displayItems = displayResponse(newGameResponse);
+                            setHistory(prev => [...prev, ...displayItems]);
+                            
+                            // Update game state if successful
+                            if (newGameResponse.success) {
+                                console.log('=== CLI: NEWGAME RESPONSE RECEIVED ===');
+                                setIsLoadingGame(false);
+                                setCurrentGameId(newGameResponse.gameData.id);
+                                setCurrentRoomName(newGameResponse.gameData.name);
+                                setCurrentRoomBackground(newGameResponse.gameData.background);
+                                setCurrentGameMode(newGameResponse.gameData.mode === 'multi-room' ? 'multi-custom' : 'single-custom');
+                                setTotalRooms(newGameResponse.gameData.totalRooms);
                             }
-                            break;
+                            return;
+                        }
+                        case '/status': response = sessionToken ? await sendCommand('/status') : "You are not in a game session. Please login first."; break;
+                        case '/leaderboard': {
+                            const leaderboardResponse = await handleLeaderboardCommand(createUserContext());
+                            const displayItems = displayResponse(leaderboardResponse);
+                            setHistory(prev => [...prev, ...displayItems]);
+                            return;
+                        }
                         case '/history': setShowHistory(true); response = 'Showing command history:'; break;
                         case '/model': 
                             if (hasAICapability) { setShowModelSelector(true); response = 'Opening model selector...'; }
@@ -783,25 +638,25 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 
     //======================================================= GAME STATES AND HANDLERS ============================================================
 
-    // ---------------------
-    // 	INITIAL LOAD
-    // ---------------------
-	useEffect(() => {
-		checkBackendConnection();
-		const timer = setTimeout(() => {
-			setHistory([
-				{ type: 'response', text: 'Welcome to the AI Escape Room CLI!' },
-				...(hasAICapability ? [{ type: 'response' as const, text: 'AI assistance is available for hints and interaction.' }] : []),
-			]);
-		}, 500);
-		return () => clearTimeout(timer);
-	}, [hasAICapability]); // Rerun if AI capability changes (e.g. after registration with API key)
+    // ----------------------------
+	// 	INITIAL LOAD
+	// ----------------------------
+    useEffect(() => {
+        checkBackendConnection();
+        const timer = setTimeout(() => {
+            setHistory([
+                { type: 'response' as const, text: 'Welcome to the AI Escape Room CLI!' },
+                ...(hasAICapability ? [{ type: 'response' as const, text: 'AI assistance is available for hints and interaction.' }] : []),
+            ]);
+        }, 500);
+        return () => clearTimeout(timer);
+    }, [hasAICapability]); // Rerun if AI capability changes (e.g. after registration with API key)
 
 
 
-    // ---------------------
+    // ----------------------------
     // 	MODEL SELECTOR
-    // ---------------------
+    // ----------------------------
     const handleCloseModelSelector = () => setShowModelSelector(false);
 
 	const handleSelectModel = (model: ModelOption) => {
@@ -813,8 +668,9 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 
 
 
-    // -------------------------------------------------------------------------------------------------
-    // `/register` command
+    // ----------------------------
+    // 	/register COMMAND
+    // ----------------------------
 	const handleRegistrationComplete = (userData: { 
         name: string; 
         email?: string; 
@@ -834,9 +690,9 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 	};
 
 
-    // ==========================================================================================================================
+    // ================================================================================================================
     //                                                  UI RENDERING
-    // ==========================================================================================================================
+    // ================================================================================================================
 
 	if (!sessionToken || !userId) { // Show UserRegistration if no token or userId
 		return <UserRegistration onRegistrationComplete={handleRegistrationComplete} />;
@@ -871,20 +727,20 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 				</Box>
 			) : isLoadingGame ? (
 				<Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="cyan" paddingX={1}>
-					<Box><Text color="cyan"><Spinner type="dots" /> {loadingMessage}</Text></Box>
+					<Box><Text color="cyan"><Spinner type="dots" />{loadingMessage}</Text></Box>
 				</Box>
 			) : null}
 
             {/* OBJECT LOCKED/UNLOCKED INDICATORS */}
             {currentGameId && (
                 <Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="gray" paddingX={1}>
-                    <Text color="gray">Objects:</Text>
-                    <Box flexDirection="row">
+                    <Text color="gray">Objects Solved:</Text>
+                    <Box flexDirection="column" gap={0.5}>
                         {currentRoomObjects.map((objectName, index) => {
                             const isUnlocked = unlockedObjects.includes(objectName);
                             return (
                                 <Text key={index} color={isUnlocked ? "green" : "red"}>
-                                    ● 
+                                    {isUnlocked ? '●' : '◌'} {objectName}
                                 </Text>
                             );
                         })}
@@ -907,7 +763,7 @@ const Terminal: React.FC<TerminalProps> = (/*{ apiKey: initialApiKey, userId: in
 				</>
 			)}
 
-			{isProcessingCommand && !isLoadingGame && (
+			{isProcessingCommand && isLoadingGame && (
 				<Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="yellow" paddingX={1}>
 					<Box>
 						<Text color="yellow"><Spinner type="dots" /> {loadingMessage}</Text>

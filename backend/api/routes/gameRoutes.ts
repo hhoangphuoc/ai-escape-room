@@ -282,54 +282,6 @@ router.post('/restart', async (req: AuthRequest, res: Response): Promise<void> =
     });
 });
 
-//---------------------------------------------------------------------------------------------------------------------------
-// POST /command - Process commands from CLI (fallback for complex commands)
-// router.post('/command', async (req: AuthRequest, res: Response): Promise<void> => {
-//     const { command } = req.body;
-//     const userId = (req.user as UserJwtPayload).sub;
-//     console.log(`API: Received command: '${command}' for user: ${userId}`);
-
-//     if (!command) {
-//         res.status(400).json({ response: 'Command is required.' });
-//         return;
-//     }
-    
-//     const user = users[userId]; // Assuming users are accessible here
-//     if (!user) {
-//         res.status(401).json({ response: 'User not found or not registered.' });
-//         return;
-//     }
-
-//     const userSession = userActiveGames[userId];
-//     if (!userSession) {
-//         res.status(404).json({ response: 'No active game found. Start a new game using /newgame.' });
-//         return;
-//     }
-//     const { gameInstance, gameMode } = userSession;
-
-//     try {
-//         console.log(`API: Routing command to ${gameMode} game ID: ${userSession.gameId} for user ${userId}`);
-//         const result: RoomCommandResponse = await gameInstance.process(command);
-        
-//         if (gameInstance instanceof MultiRoomGame) {
-//             userSession.currentRoomSequence = gameInstance.getCurrentRoomNumber();
-//             userSession.totalRooms = gameInstance.getTotalRooms();
-//             const currentRoomData = gameInstance.getCurrentRoom().getRoomData();
-//             userSession.currentRoomName = currentRoomData?.name || 'Unknown Room';
-//         } else if (gameInstance instanceof RoomAgent) {
-//              userSession.currentRoomSequence = 1;
-//              userSession.totalRooms = 1;
-//              const roomData = gameInstance.getRoomData();
-//              userSession.currentRoomName = roomData?.name || 'Unknown Room';
-//         }
-//         res.json({ response: result.data?.message || result.response || 'Action processed.', data: result.data });
-//     } catch (error) {
-//         console.error(`Error processing command in ${gameMode} game ${userSession.gameId} for user ${userId}:`, error);
-//         res.status(500).json({ response: `Error processing command in ${gameMode} game.` });
-//     }
-// });
-//---------------------------------------------------------------------------------------------------------------------------
-
 // POST /newgame - Create a new escape room (single or multi)
 router.post('/newgame', async (req: AuthRequest, res: Response): Promise<void> => {
     const { mode = 'single-room', roomCount, gameTheme } = req.body;
@@ -697,27 +649,6 @@ router.post('/chat', async (req: AuthRequest, res: Response): Promise<void> => {
 //                                            LEADERBOARD FUNCTIONS
 //-----------------------------------------------------------------------------------------------------------------------------
 
-// // GET /leaderboard - Get the game leaderboard (from legacy leaderboard collection)
-// router.get('/leaderboard', async (req: AuthRequest, res: Response): Promise<void> => {
-//     const gameMode = req.query.mode as string || 'all';
-//     const limit = parseInt(req.query.limit as string) || 10;
-    
-//     console.log(`API: Received /leaderboard request for mode: ${gameMode}`);
-    
-//     try {
-//         const leaderboard = await getFirebaseLeaderboard(gameMode, limit);
-//         res.json({
-//             leaderboard,
-//             count: leaderboard.length,
-//             mode: gameMode,
-//             source: 'legacy'
-//         });
-//     } catch (error) {
-//         console.error(`[API Error] in /leaderboard:`, error);
-//         res.status(500).json({ error: "Failed to fetch leaderboard." });
-//     }
-// });
-
 // GET /leaderboard/games - Get the game leaderboard (from games collection)
 router.get('/leaderboard/games', async (req: AuthRequest, res: Response): Promise<void> => {
     const gameMode = req.query.mode as string || 'all';
@@ -757,51 +688,5 @@ router.get('/leaderboard/me', async (req: AuthRequest, res: Response): Promise<v
         res.status(500).json({ error: "Failed to fetch user scores." });
     }
 });
-
-// // POST /leaderboard/submit - Submit a score to the leaderboard
-// router.post('/leaderboard/submit', async (req: AuthRequest, res: Response): Promise<void> => {
-//     const userId = (req.user as UserJwtPayload).sub;
-//     const { gameId, timeElapsed, hintsUsed, gameMode } = req.body;
-    
-//     console.log(`API: Received leaderboard submission from user ${userId}`);
-    
-//     if (!gameId || !timeElapsed) {
-//         res.status(400).json({ error: 'GameId and timeElapsed are required.' });
-//         return;
-//     }
-    
-//     const user = users[userId];
-//     if (!user) {
-//         res.status(401).json({ error: 'User not found.' });
-//         return;
-//     }
-    
-//     try {
-//         const success = await saveScoreToLeaderboard({
-//             userId,
-//             userName: user.name,
-//             gameId,
-//             timeElapsed,
-//             hintsUsed: hintsUsed || 0,
-//             gameMode: gameMode || 'single-custom',
-//             submittedAt: new Date().toISOString()
-//         });
-        
-//         if (success) {
-//             res.json({
-//                 success: true,
-//                 message: "Score submitted successfully to leaderboard"
-//             });
-//         } else {
-//             res.json({
-//                 success: false,
-//                 message: "Score saved locally but Firebase sync failed"
-//             });
-//         }
-//     } catch (error) {
-//         console.error(`[API Error] in /leaderboard/submit:`, error);
-//         res.status(500).json({ error: "Failed to submit score." });
-//     }
-// });
 
 export default router; 

@@ -1,9 +1,10 @@
 import React from 'react';
 import {Box, Text} from 'ink';
+import { HistoryItem, getColorForResponseType } from '../utils/responseDisplay.js';
 // import Gradient from 'ink-gradient';
 
 interface CommandHistoryProps {
-	history: Array<{type: 'command' | 'response'; text: string}>;
+	history: HistoryItem[];
 	showHistory: boolean;
 }
 
@@ -44,11 +45,10 @@ const CommandHistory: React.FC<CommandHistoryProps> = ({history, showHistory}) =
 					);
 				}
 
-				// For response items, handle multi-line content with better formatting
 				return (
 					<Box key={index} flexDirection="column" marginY={1} paddingX={1}>
 						{(item.text || '').split('\n').map((line, lineIndex) => (
-							<Text key={`${index}-${lineIndex}`} color="white" dimColor={true} wrap="wrap">
+							<Text key={`${index}-${lineIndex}`} color={getColorForResponseType(item.type)} dimColor={item.type === 'response'} wrap="wrap">
 								{line}
 							</Text>
 						))}
